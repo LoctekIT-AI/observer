@@ -3,10 +3,10 @@ Metadata-only Skill/MCP lifecycle observer for desktop AI tools.
 This repository publishes customer-ready Observer bundles and release notes.
 
 ## Current release
-- Version: v0.2.1
+- Version: v0.2.2
 - Supported and verified: macOS arm64/x64
 - Windows x64: customer install and native desktop event delivery testing in progress
-- Download: [Observer v0.2.1 customer test bundle](https://github.com/reyfeng9-glitch/observer/releases/tag/v0.2.1)
+- Download: [Observer v0.2.2 customer test bundle](https://github.com/reyfeng9-glitch/observer/releases/tag/v0.2.2)
 
 ## Scope
 - Native desktop host adapters and observer workers
