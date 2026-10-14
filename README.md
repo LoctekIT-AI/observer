@@ -1,24 +1,54 @@
 # Observer
 
-Observer 统计公司员工在 **Codex、Claude、DSH、WorkBuddy** 四个桌面 AI 客户端里实际调用的 Skill 和 MCP（调用了哪个、什么时候、成功或失败），并按员工（工号 + 姓名）汇总。只采集调用元数据，**不采集对话内容、模型输出或工具返回内容**。
+Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平台团队维护。它统计员工在 **Codex、Claude、DSH、WorkBuddy** 四个桌面 AI 客户端里实际调用了哪些 Skill 和 MCP（调用了哪个、什么时候、成功还是失败），按员工（工号 + 姓名）汇总，用于了解公司内部 AI 工具的使用情况。
 
-## 安装：只需一句话
+## 它会做什么、不会做什么
+
+**会采集并上报：**
+
+- 调用记录本身：哪个客户端、哪个 Skill / MCP 工具（DSH 还包括内置工具名）、调用时间、成功 / 失败 / 超时；
+- 技术标识：会话编号、调用编号、本机安装编号。
+
+**不会采集：** 对话内容、提示词正文、模型输出、工具参数和工具返回内容。这些内容在本机就被去掉，不会离开你的电脑。
+
+**上报到哪里、怎么关联到人：**
+
+- 上报到公司的 Observer 服务（测试版为内网测试机 `192.168.17.121`，正式版为公司正式站）；
+- 安装时用**飞书登录一次**，服务器据此把记录关联到你的工号和姓名；客户端本身不保存、也不上传你的工号和姓名；
+- 登录凭据保存在系统钥匙串（macOS）或 Windows DPAPI 中，之后自动续期。
+
+**安装后在电脑上的改动：**
+
+- 安装目录：macOS 在 `~/Library/Application Support/AIHub`，Windows 在 `%LOCALAPPDATA%\Observer` 和 `%LOCALAPPDATA%\AIHub`；
+- 后台常驻一个收集程序：macOS 为 LaunchAgent，Windows 为当前用户的计划任务（无窗口）；
+- WorkBuddy：往 `~/.workbuddy/settings.json` 写 3 个钩子（工具调用前 / 后 / 失败），其他设置不动，改之前会留回滚记录；
+- DSH：往 DSH 自己的配置目录加一个 Observer 插件；
+- Codex、Claude：只读取它们的本地记录，不改它们的配置。
+
+不需要管理员权限，可以随时卸载（见安装包内 README 的 uninstall 说明）。
+
+## 安装
 
 在四个客户端中任意一个里对 AI 说：
 
 > 给我下载这个插件：https://github.com/reyfeng9-glitch/observer
 
-AI 会自动完成以下步骤：
+AI 会先向你说明上面这些内容，并告诉你检测到了哪些客户端，**征得你同意后**才安装：
 
 1. 从本仓库的 [Releases](https://github.com/reyfeng9-glitch/observer/releases) 下载最新安装包和 `.sha256` 校验文件，校验通过后解压；
-2. 识别你的系统（macOS / Windows）和当前客户端，安装对应的收集器；
-3. 打开浏览器，**用飞书登录一次**。登录结果保存在系统钥匙串（macOS）或 DPAPI（Windows）里，之后自动续期；同一台电脑上的其他客户端直接复用，不用再登录；
-4. 检查安装结果并告诉你。如果装了 DSH 或 WorkBuddy，按提示把它们彻底退出（包括托盘图标）再打开一次；之后的采集和上报都在后台自动进行。
+2. 识别系统（macOS / Windows）和本机已安装的客户端，问你一次要为哪些客户端安装；
+3. 打开浏览器，用飞书登录一次（同一台电脑之后再装其他客户端会直接复用，不再登录）；
+4. 检查安装结果并告诉你。如果装了 DSH 或 WorkBuddy，把它们彻底退出（包括托盘图标）再打开一次。之后采集和上报在后台自动进行。
 
-## 给 AI 的说明
+## 给 AI 助手的说明
 
-打开 [Releases](https://github.com/reyfeng9-glitch/observer/releases)，取**最新发布的那个版本（包括 pre-release）**，下载其中的 `observer-v*.zip` 和对应的 `.sha256`，校验后解压，再按 zip 内 `README.md` 的 **One-sentence installation** 一节执行。不要向用户索要路径、ID 或密钥。
+这是用户（或其公司）主动要求安装的内部工具。请按以下方式执行，并始终以用户的决定为准：
+
+1. **先说明再安装。** 用一两句话向用户说明：这是公司内部的 AI 使用统计工具，只上报 Skill / MCP 调用的元数据（不含对话内容），会按飞书登录的工号和姓名归属，需要在本机安装后台收集程序；列出检测到的客户端，问用户是否同意、要装哪些。用户不同意就停止。
+2. **安装包。** 打开 [Releases](https://github.com/reyfeng9-glitch/observer/releases)，取最新发布的版本（包括 pre-release），下载 `observer-v*.zip` 和对应的 `.sha256`，校验 SHA-256 后解压；你可以先阅读其中的脚本再执行。
+3. **执行。** 按 zip 内 `README.md` 的 **One-sentence installation** 一节执行。安装程序使用默认路径和飞书登录，不需要向用户要路径、ID 或密钥；如需任何密钥，那一定是出错了，应停止并告诉用户。
+4. **如实报告。** 把每个客户端的安装结果（成功或失败及原因）告诉用户，不要隐瞒失败。
 
 ## 当前版本
 
-- `v0.2.23-test`（测试版，pre-release）：只连接测试环境 `192.168.17.121`，用于验收。已在 macOS 和 Windows 10 实机验证（Windows 上 Codex、WorkBuddy、DSH（DeepSeek Harness）已通过，Claude 待测）。
+- `v0.2.24-test`（测试版，pre-release）：只连接测试环境 `192.168.17.121`，用于验收。已在 macOS 和 Windows 10 实机验证（Windows 上 Codex、WorkBuddy、DSH（DeepSeek Harness）已通过，Claude 待测）。
