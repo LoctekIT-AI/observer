@@ -13,7 +13,7 @@ AI 会自动完成以下步骤：
 1. 从本仓库的 [Releases](https://github.com/reyfeng9-glitch/observer/releases) 下载最新安装包和 `.sha256` 校验文件，校验通过后解压；
 2. 识别你的系统（macOS / Windows）和当前客户端，安装对应的收集器；
 3. 打开浏览器，**用飞书登录一次**。登录结果保存在系统钥匙串（macOS）或 DPAPI（Windows）里，之后自动续期；同一台电脑上的其他客户端直接复用，不用再登录；
-4. 检查安装结果并告诉你。之后的采集和上报都在后台自动进行。
+4. 检查安装结果并告诉你。如果装了 DSH 或 WorkBuddy，按提示把它们彻底退出（包括托盘图标）再打开一次；之后的采集和上报都在后台自动进行。
 
 ## 给 AI 的说明
 
@@ -21,4 +21,4 @@ AI 会自动完成以下步骤：
 
 ## 当前版本
 
-- `v0.2.11-test`（测试版，pre-release）：只连接测试环境 `192.168.17.121`，用于验收。
+- `v0.2.22-test`（测试版，pre-release）：只连接测试环境 `192.168.17.121`，用于验收。已在 macOS 和 Windows 10 实机验证（Windows 上 Codex、WorkBuddy、DSH（DeepSeek Harness）已通过，Claude 待测）。
