@@ -87,3 +87,21 @@ def test_worker_reads_compacted_table_once_and_skips_pre_install_history(tmp_pat
     assert report.errors == ()
     assert worker.outbox.count_by_status() == {"pending": 2}  # A once, B once, C never
     worker.close()
+
+
+def test_worker_uploads_unrecognized_claude_call(tmp_path):
+    # Layer 3 end to end: an unreadable call reaches the upload queue as one inferred record.
+    from cowork_runtime.observer.claude_worker import ClaudeDesktopObserverWorker
+    from leveldb_fixtures import v8
+
+    source = tmp_path / "leveldb"
+    source.mkdir()
+    log = source / "000003.log"
+    log.write_bytes(b"")
+    worker = ClaudeDesktopObserverWorker(source_root=source, state_dir=tmp_path / "state", flush=False)
+    worker.run_once()
+    log.write_bytes(b"o" + v8("type") + v8("tool_use") + v8("future_id_key") + v8("x") + b"{\x02")
+    assert worker.run_once().errors == ()
+    [item] = worker.outbox.claim(owner_id="t", now=datetime.now(timezone.utc))
+    assert (item.event.component_kind, item.event.evidence_level) == ("unknown", "inferred")
+    worker.close()

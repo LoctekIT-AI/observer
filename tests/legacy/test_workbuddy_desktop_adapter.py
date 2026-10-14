@@ -80,13 +80,17 @@ def test_workbuddy_hook_adapter_maps_explicit_tool_lifecycle_without_bodies(tmp_
     store.close()
 
 
-def test_workbuddy_hook_adapter_rejects_terminal_without_explicit_correlation(tmp_path) -> None:
+def test_workbuddy_terminal_without_correlation_is_counted_as_unrecognized(tmp_path) -> None:
+    # Layer 3: do not guess the component, but do not lose the call either.
     store, adapter = _adapter(tmp_path)
     path = tmp_path / "workbuddy-hook-events.jsonl"
     _write_jsonl(path, [_record(stage="completed", invocation_id="")])
 
-    with pytest.raises(WorkBuddyParseError, match="invocation_id"):
-        adapter.read(path, installation_id="install-workbuddy-desktop-1", session_id="session-1")
+    result = adapter.read(path, installation_id="install-workbuddy-desktop-1", session_id="session-1")
+
+    [event] = result.events
+    assert (event.component_kind, event.evidence_level) == ("unknown", "inferred")
+    assert result.diagnostics
     store.close()
 
 

@@ -295,16 +295,19 @@ def test_claude_desktop_skips_builtin_only_records_without_failing(tmp_path) -> 
     store.close()
 
 
-def test_claude_desktop_rejects_tool_records_it_cannot_read(tmp_path) -> None:
-    import pytest
-    from cowork_runtime.adapters.claude_desktop import ClaudeDesktopParseError
-
+def test_claude_desktop_counts_tool_records_it_cannot_read_as_unrecognized(tmp_path) -> None:
+    # Layer 3: an unreadable call is counted (inferred) instead of stopping the source.
     store, _, adapter = _adapter(tmp_path)
     source = tmp_path / "000007.log"
     source.write_bytes(b"o" + _v8("type") + _v8("tool_use") + _v8("tool_ref") + _v8("x") + b"{\x02")
 
-    with pytest.raises(ClaudeDesktopParseError):
-        adapter.read(source, installation_id="install-claude-desktop-1", session_id="desktop-session-1")
+    result = adapter.read(source, installation_id="install-claude-desktop-1", session_id="desktop-session-1", persist_cursor=False)
+
+    [event] = result.events
+    assert (event.component_kind, event.evidence_level, event.component_id) == ("unknown", "inferred", "unrecognized:claude_tool_use")
+    assert "unparsed_tool_use_records=1" in result.diagnostics
+    again = adapter.read(source, installation_id="install-claude-desktop-1", session_id="desktop-session-1", persist_cursor=False)
+    assert again.events[0].event_id == event.event_id  # stable: re-reads do not double count
     store.close()
 
 
@@ -353,7 +356,7 @@ def test_claude_desktop_reads_tool_records_split_across_leveldb_blocks(tmp_path)
     assert "leveldb_log_framing_removed" in result.diagnostics
     assert result.next_cursor.offset == len(complete)
 
-    again = adapter.read(source, installation_id="install-claude-desktop-1", session_id="desktop-session-1")
+    again = adapter.read(source, installation_id="install-claude-desktop-1", session_id="desktop-session-1", persist_cursor=False)
     assert again.events == ()
     assert again.next_cursor.offset == len(complete)
     store.close()

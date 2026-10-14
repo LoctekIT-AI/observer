@@ -17,6 +17,7 @@ from uuid import uuid4
 
 from cowork_contracts import COMPONENT_EVENT_CONTRACT_VERSION, PluginManifestV1
 
+from ..adapters.degraded import is_degraded
 from ..adapters.delivery import ComponentEventDelivery
 from ..adapters.registry import CodexCursor, PluginRegistry
 from ..adapters.workbuddy_desktop import WorkBuddyDesktopAdapter
@@ -124,7 +125,7 @@ class WorkBuddyDesktopObserverWorker:
                     continue  # a broken line is skipped (and counted) by the adapter
                 if not isinstance(record, dict):
                     continue
-                if record.get("schema_version") not in {"workbuddy_hook_event.v1", "workbuddy_interaction_event.v1"}:
+                if record.get("schema_version") not in {"workbuddy_hook_event.v1", "workbuddy_interaction_event.v1", "workbuddy_unrecognized_event.v1"}:
                     continue
                 session_id = record.get("session_id")
                 if isinstance(session_id, str) and session_id.strip():
@@ -191,7 +192,7 @@ class WorkBuddyDesktopObserverWorker:
         )
         # Malformed source lines the adapter had to skip stay visible in status.json.
         self._skipped_records = getattr(self, "_skipped_records", 0) + len(result.diagnostics)
-        events = [event for event in result.events if event.component_kind in {"skill", "mcp_tool"}]
+        events = [event for event in result.events if event.component_kind in {"skill", "mcp_tool"} or is_degraded(event)]
         terminal = 0
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})

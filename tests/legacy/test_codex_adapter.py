@@ -765,26 +765,28 @@ def test_duplicate_item_completed_wrapper_is_ignored_and_sessions_are_isolated(t
     store.close()
 
 
-def test_malformed_json_exposes_path_and_byte_offset(tmp_path) -> None:
+def test_malformed_json_is_skipped_and_reported_with_byte_offset(tmp_path) -> None:
+    # Layer 3: a broken line no longer blocks the rest of the session.
     store, adapter = _adapter(tmp_path)
     path = tmp_path / "broken.jsonl"
     path.write_bytes(b"{\"type\": \"response_item\"}\nnot-json\n")
 
-    with pytest.raises(CodexParseError) as caught:
-        adapter.read(path, installation_id="install-codex-1", session_id="session-1")
+    result = adapter.read(path, installation_id="install-codex-1", session_id="session-1")
 
-    assert caught.value.path == str(path.resolve())
-    assert caught.value.offset > 0
+    assert [(d.code, d.offset > 0) for d in result.diagnostics] == [("malformed_record", True)]
+    assert result.next_cursor.offset == path.stat().st_size
     store.close()
 
 
-def test_orphan_result_is_rejected_instead_of_guessing_component_identity(tmp_path) -> None:
+def test_orphan_result_is_reported_instead_of_guessing_component_identity(tmp_path) -> None:
     store, adapter = _adapter(tmp_path)
     path = tmp_path / "orphan.jsonl"
     _write_jsonl(path, [_result("orphan")])
 
-    with pytest.raises(CodexParseError, match="matching tool start"):
-        adapter.read(path, installation_id="install-codex-1", session_id="session-1")
+    result = adapter.read(path, installation_id="install-codex-1", session_id="session-1")
+
+    assert result.events == ()  # an output alone is not counted as a call
+    assert [d.code for d in result.diagnostics] == ["unrecognized_record"]
     store.close()
 
 

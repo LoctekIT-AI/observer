@@ -132,6 +132,21 @@ def _event_path(explicit: Path | None = None) -> Path:
     return directory / "workbuddy-hook-events.jsonl"
 
 
+def _unrecognized_event(payload: dict[str, Any], *, stage: str) -> dict[str, str]:
+    session_id = payload.get("session_id")
+    tool_name = payload.get("tool_name")
+    event = {
+        "schema_version": "workbuddy_unrecognized_event.v1",
+        "occurred_at": _utc_now(),
+        "stage": stage,
+        "hook_event_name": _STAGE_TO_HOOK[stage],
+        "hint": tool_name.strip()[:96] if isinstance(tool_name, str) and tool_name.strip() else "hook",
+    }
+    if isinstance(session_id, str) and session_id.strip() and len(session_id.strip()) <= _MAX_SESSION_ID:
+        event["session_id"] = session_id.strip()
+    return event
+
+
 def _append_line(path: Path, line: bytes) -> None:
     """Append one complete JSONL line.
 
@@ -186,7 +201,15 @@ def main(argv: list[str] | None = None) -> int:
         payload = json.loads(raw.decode("utf-8"))
         if not isinstance(payload, dict):
             raise ValueError("hook input must be a JSON object")
-        event = _event(payload, stage=args.stage)
+        try:
+            event = _event(payload, stage=args.stage)
+        except ValueError:
+            # WorkBuddy sent a hook this bridge cannot read (usually a newer
+            # WorkBuddy format). Keep one metadata-only marker for a finished
+            # call so it is still counted as an unrecognized call.
+            if args.stage not in {"completed", "failed"}:
+                raise
+            event = _unrecognized_event(payload, stage=args.stage)
         path = _event_path(args.event_file)
         _append_line(path, (json.dumps(event, separators=(",", ":")) + "\n").encode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError, OSError, ValueError) as exc:

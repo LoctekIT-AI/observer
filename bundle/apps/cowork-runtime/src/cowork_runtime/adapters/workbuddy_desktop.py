@@ -12,6 +12,7 @@ from typing import Any
 
 from cowork_contracts import ComponentEventV1
 
+from .degraded import degraded_event
 from .registry import CodexCursor, PluginRegistry
 
 
@@ -167,20 +168,27 @@ class WorkBuddyDesktopAdapter:
                     offset = next_offset
                     continue
                 schema_version = record.get("schema_version")
-                if (
+                if schema_version == "workbuddy_unrecognized_event.v1" or (
                     isinstance(schema_version, str)
                     and schema_version.startswith("workbuddy_")
                     and schema_version
                     not in {"workbuddy_hook_event.v1", "workbuddy_interaction_event.v1"}
                 ):
-                    # Hook schemas are versioned by WorkBuddy.  Do not skip a
-                    # newer schema: that would make the worker look healthy
-                    # while silently losing calls until its adapter is updated.
-                    raise WorkBuddyParseError(
-                        "unsupported WorkBuddy hook schema",
-                        path=str(source_path),
-                        offset=line_offset,
-                    )
+                    # Written by the hook bridge when WorkBuddy sent a hook it could
+                    # not read (or a newer schema): count one unrecognized call for
+                    # this session and keep going.
+                    diagnostics.append(f"unrecognized record at offset {line_offset}")
+                    record_session = record.get("session_id")
+                    if record_session == session_id:
+                        events.append(degraded_event(
+                            runtime="workbuddy", plugin_id="workbuddy-desktop-adapter",
+                            installation_id=installation_id, session_id=session_id, run_id=run_id or session_id,
+                            native_call=f"{source_path.name}:{line_offset}", hint=record.get("hint") or schema_version,
+                            occurred_at=_parse_datetime(record.get("occurred_at"), default=current_time),
+                            source_type="workbuddy_hook_jsonl", evidence_source="workbuddy_hook_unrecognized", binding=binding,
+                        ))
+                    offset = next_offset
+                    continue
                 if record.get("schema_version") == "workbuddy_interaction_event.v1":
                     if _required_string(record, "session_id", max_length=256) != session_id:
                         offset = next_offset
@@ -194,7 +202,7 @@ class WorkBuddyDesktopAdapter:
                             events[index] = events[index].model_copy(update={"model_output": None})
                         pending_terminal_event_indexes.clear()
                     else:
-                        raise WorkBuddyParseError(f"unsupported interaction stage: {interaction_stage}", path=str(source_path), offset=line_offset)
+                        diagnostics.append(f"unsupported interaction stage at offset {line_offset}")
                     offset = next_offset
                     continue
                 try:
@@ -208,8 +216,20 @@ class WorkBuddyDesktopAdapter:
                         starts=starts,
                         user_input=latest_user_input,
                     )
-                except ValueError as exc:
-                    raise WorkBuddyParseError(str(exc), path=str(source_path), offset=line_offset) from exc
+                except ValueError:
+                    # A hook record this version cannot read: count one
+                    # unrecognized call when it belongs to this session.
+                    diagnostics.append(f"unrecognized record at offset {line_offset}")
+                    if record.get("session_id") == session_id and record.get("stage") in {"completed", "failed"}:
+                        events.append(degraded_event(
+                            runtime="workbuddy", plugin_id="workbuddy-desktop-adapter",
+                            installation_id=installation_id, session_id=session_id, run_id=run_id or session_id,
+                            native_call=f"{source_path.name}:{line_offset}", hint=record.get("tool_name") or "hook",
+                            occurred_at=_parse_datetime(record.get("occurred_at"), default=current_time),
+                            source_type="workbuddy_hook_jsonl", evidence_source="workbuddy_hook_unrecognized", binding=binding,
+                        ))
+                    offset = next_offset
+                    continue
                 if event is not None and event.event_id not in seen:
                     skill_id = (
                         _optional_identifier(record, "skill_id", max_length=512)
@@ -257,20 +277,7 @@ class WorkBuddyDesktopAdapter:
                 except (UnicodeDecodeError, json.JSONDecodeError):
                     continue  # reported once by read() when the line was first consumed
                 if not isinstance(record, dict) or record.get("schema_version") != "workbuddy_hook_event.v1":
-                    schema_version = record.get("schema_version") if isinstance(record, dict) else None
-                    if (
-                        isinstance(schema_version, str)
-                        and schema_version.startswith("workbuddy_")
-                        and schema_version
-                        not in {"workbuddy_hook_event.v1", "workbuddy_interaction_event.v1"}
-                    ):
-                        # 增量游标重建也必须拒绝未知 Hook 版本，不能因它位于旧前缀而漏报。
-                        raise WorkBuddyParseError(
-                            "unsupported WorkBuddy hook schema",
-                            path=str(path),
-                            offset=line_offset,
-                        )
-                    continue
+                    continue  # interaction and unrecognized records carry no start context
                 if _required_string(record, "session_id", max_length=256) != session_id:
                     continue
                 stage = _required_string(record, "stage", max_length=32)

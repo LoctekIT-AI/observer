@@ -18,6 +18,7 @@ from uuid import uuid4
 from cowork_contracts import COMPONENT_EVENT_CONTRACT_VERSION, PluginManifestV1
 
 from ..adapters.codex import CodexIncrementalAdapter
+from ..adapters.degraded import is_degraded
 from ..adapters.delivery import ComponentEventDelivery
 from ..adapters.registry import CodexCursor, PluginRegistry
 from ..persistence.sqlite_store import SQLiteRuntimeStore
@@ -208,7 +209,7 @@ class CodexObserverWorker:
         installed_at = getattr(self, "_installed_at", None) if cursor is None and archived else None
         events = [
             event for event in result.events
-            if event.component_kind in {"skill", "mcp_tool"} and (installed_at is None or event.occurred_at >= installed_at)
+            if (event.component_kind in {"skill", "mcp_tool"} or is_degraded(event)) and (installed_at is None or event.occurred_at >= installed_at)
         ]
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})

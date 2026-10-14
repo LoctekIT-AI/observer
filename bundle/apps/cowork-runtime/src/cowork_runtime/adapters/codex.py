@@ -13,6 +13,7 @@ from typing import Any
 
 from cowork_contracts import ComponentEventV1
 
+from .degraded import degraded_event
 from .registry import CodexCursor, PluginRegistry
 
 
@@ -266,6 +267,27 @@ def _terminal_stage(status: str) -> str:
     return stage
 
 
+def _degraded_call(record: dict[str, Any]) -> tuple[str, str | None] | None:
+    """(format hint, native call id) when an unreadable record looks like a call."""
+    payload = record.get("payload")
+    if not isinstance(payload, dict):
+        return None
+    candidates = [payload]
+    if isinstance(payload.get("item"), dict):
+        candidates.append(payload["item"])
+    for candidate in candidates:
+        kind = candidate.get("type")
+        if not isinstance(kind, str):
+            continue
+        folded = kind.casefold()
+        if folded.endswith("output") or folded.endswith("_end") or "result" in folded:
+            return None  # the matching call record is what gets counted
+        if "tool" in folded or "call" in folded:
+            call = candidate.get("call_id") or candidate.get("id")
+            return kind, call.strip() if isinstance(call, str) and call.strip() else None
+    return None
+
+
 def _reject_unknown_tool_record(record: dict[str, Any], *, path: str, offset: int) -> None:
     """Reject a new tool payload until its event semantics are implemented."""
 
@@ -338,6 +360,7 @@ class CodexIncrementalAdapter:
             offset = 0
 
         events: list[ComponentEventV1] = []
+        diagnostics: list[CodexDiagnostic] = []
         seen_keys: set[str] = set()
         started_at_by_call: dict[str, datetime] = {}
         name_by_call: dict[str, str] = {}
@@ -376,8 +399,12 @@ class CodexIncrementalAdapter:
                         offset = next_offset
                         continue
                     record = json.loads(line)
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise CodexParseError(f"invalid JSONL record: {exc}", path=str(source_path), offset=line_offset) from exc
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    # A complete line that is not JSON cannot be repaired; skip it
+                    # (reported in diagnostics) instead of blocking the session.
+                    diagnostics.append(CodexDiagnostic("malformed_record", "skipped a line that is not JSON", str(source_path), line_offset))
+                    offset = next_offset
+                    continue
                 if not isinstance(record, dict):
                     continue
                 try:
@@ -452,7 +479,22 @@ class CodexIncrementalAdapter:
                         seen_keys=seen_keys,
                     )
                 except ValueError as exc:
-                    raise CodexParseError(str(exc), path=str(source_path), offset=line_offset) from exc
+                    # A record this adapter version cannot read (usually a new
+                    # Codex format). Count it as an unrecognized call when it
+                    # looks like an invocation, report it, and keep going.
+                    diagnostics.append(CodexDiagnostic("unrecognized_record", type(exc).__name__, str(source_path), line_offset))
+                    degraded = _degraded_call(record)
+                    if degraded is not None:
+                        hint, native_call = degraded
+                        events.append(degraded_event(
+                            runtime="codex", plugin_id="codex-adapter", installation_id=installation_id,
+                            session_id=session_id, run_id=run_id or session_id,
+                            native_call=native_call or f"{source_path.name}:{line_offset}", hint=hint,
+                            occurred_at=_parse_datetime(record.get("timestamp"), default=current_time),
+                            source_type="rollout_jsonl", evidence_source="codex_rollout_unrecognized", binding=binding,
+                        ))
+                    offset = next_offset
+                    continue
                 item_event_start = len(events)
                 events.extend(native_exec_events)
                 events.extend(item_events)
@@ -490,7 +532,7 @@ class CodexIncrementalAdapter:
         )
         if persist_cursor:
             self.registry.save_cursor(next_cursor)
-        return CodexReadResult(events=tuple(events), next_cursor=next_cursor, diagnostics=())
+        return CodexReadResult(events=tuple(events), next_cursor=next_cursor, diagnostics=tuple(diagnostics))
 
     @staticmethod
     def _rebuild_context(
@@ -518,8 +560,8 @@ class CodexIncrementalAdapter:
                     raise CodexParseError("rollout context is truncated", path=str(path), offset=line_offset)
                 try:
                     record = json.loads(raw_line.decode("utf-8"))
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-                    raise CodexParseError(f"invalid JSONL context record: {exc}", path=str(path), offset=line_offset) from exc
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    continue  # reported by read() when the line was first consumed
                 if not isinstance(record, dict):
                     continue
 
@@ -534,7 +576,10 @@ class CodexIncrementalAdapter:
                         source_session = payload.get("session_id")
                         if source_session is None or source_session == session_id:
                             payload_type = payload.get("type")
-                            _reject_unknown_tool_record(record, path=str(path), offset=line_offset)
+                            try:
+                                _reject_unknown_tool_record(record, path=str(path), offset=line_offset)
+                            except CodexParseError:
+                                continue  # counted as unrecognized by read()
                             call_id = payload.get("call_id")
                             if isinstance(call_id, str) and call_id.strip():
                                 call_id = call_id.strip()

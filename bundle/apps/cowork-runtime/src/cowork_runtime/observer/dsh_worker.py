@@ -102,6 +102,9 @@ class DshObserverWorker:
             cursor = self.registry.cursor(self.reader_id, str(path))
             offset = cursor.offset if cursor and cursor.file_identity == identity and cursor.offset <= stat.st_size else 0
             for event, next_offset in self.adapter.read(path, offset=offset):
+                if event is None:  # skipped line: just move past it
+                    self.registry.save_cursor(CodexCursor(self.reader_id, str(path), identity, next_offset, datetime.now(timezone.utc)))
+                    continue
                 self._register(event.installation_id)
                 binding = self.registry.binding(event.installation_id)
                 if binding is not None:
@@ -126,7 +129,8 @@ class DshObserverWorker:
         except (OSError, ValueError, RuntimeError) as exc:
             self._status("failed", error_type=type(exc).__name__)
             raise
-        self._status("ok", files=result.files, events=result.events, terminal_enqueued=result.terminal_enqueued)
+        self._status("ok", files=result.files, events=result.events, terminal_enqueued=result.terminal_enqueued,
+                     skipped_records=self.adapter.skipped)
         return result
 
     def _status(self, status: str, **fields: object) -> None:

@@ -56,7 +56,25 @@ export function apply(ctx, suppliedConfig) {
     catch (error) {
       // INFO is exported by default; report only collection error metadata, never business content.
       ctx.logger.info(`dsh-observer collection failed (${seam}): ${error.name}${error.code ? ` ${error.code}` : ''}`);
-      throw error;
+      // A DSH update changed the hook data: still count the call (inferred), and
+      // never let collection break the user's tool call.
+      if (seam === 'tools/result') {
+        try {
+          const [exec] = args;
+          const sessionId = typeof exec?.agent?.session?.id === 'string' && exec.agent.session.id ? exec.agent.session.id : 'dsh-unknown-session';
+          const callId = typeof exec?.callId === 'string' && exec.callId ? exec.callId : `unknown-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+          const record = eventBase(config, identifier(sessionId, 'session id'), callId, new Date().toISOString());
+          record.component_kind = 'unknown';
+          record.component_id = 'unrecognized:dsh_tool';
+          record.error_code = null;
+          record.stage = 'completed';
+          record.observation_kind = 'unrecognized_call';
+          record.evidence_source = 'dsh:tools/result';
+          record.evidence_level = 'inferred';
+          append(record);
+        } catch { /* nothing else can be recorded safely */ }
+      }
+      return undefined;
     }
   };
   ctx.on('tools/result', observe('tools/result', (exec, result) => {

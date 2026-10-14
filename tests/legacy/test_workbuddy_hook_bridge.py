@@ -56,7 +56,7 @@ def test_pre_tool_hook_persists_only_documented_metadata(tmp_path: Path) -> None
     }
 
 
-def test_terminal_hook_without_official_tool_use_id_fails_instead_of_guessing(tmp_path: Path) -> None:
+def test_terminal_hook_without_official_tool_use_id_is_kept_as_unrecognized_marker(tmp_path: Path) -> None:
     result = _run_bridge(
         tmp_path,
         stage="completed",
@@ -69,9 +69,12 @@ def test_terminal_hook_without_official_tool_use_id_fails_instead_of_guessing(tm
         },
     )
 
-    assert result.returncode == 1
-    assert "tool_use_id" in result.stderr
-    assert not (tmp_path / "workbuddy-events" / "workbuddy-hook-events.jsonl").exists()
+    assert result.returncode == 0
+    written = (tmp_path / "workbuddy-events" / "workbuddy-hook-events.jsonl").read_text()
+    [record] = [json.loads(line) for line in written.splitlines()]
+    assert record["schema_version"] == "workbuddy_unrecognized_event.v1"
+    assert record["hint"] == "Bash" and record["session_id"] == "session-1"
+    assert "must-not-persist" not in written
 
 
 def test_plugin_hook_uses_worker_default_directory_without_shell_environment(tmp_path: Path) -> None:

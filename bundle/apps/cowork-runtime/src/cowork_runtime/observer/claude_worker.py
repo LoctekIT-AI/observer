@@ -17,6 +17,7 @@ from uuid import uuid4
 from cowork_contracts import COMPONENT_EVENT_CONTRACT_VERSION, PluginManifestV1
 
 from ..adapters.claude_desktop import ClaudeDesktopAdapter
+from ..adapters.degraded import is_degraded
 from ..adapters.delivery import ComponentEventDelivery
 from ..adapters.registry import CodexCursor, PluginRegistry
 from ..persistence.sqlite_store import SQLiteRuntimeStore
@@ -227,7 +228,7 @@ class ClaudeDesktopObserverWorker:
         installed_at = getattr(self, "_installed_at", None) if cursor is None and table else None
         events = []
         for event in result.events:
-            if event.component_kind not in {"skill", "mcp_tool"}:
+            if event.component_kind not in {"skill", "mcp_tool"} and not is_degraded(event):
                 continue
             # LevelDB compaction rewrites records from the log into a new table
             # file. A new file is read from its start, so drop calls from before

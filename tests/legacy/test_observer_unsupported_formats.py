@@ -13,7 +13,7 @@ from cowork_runtime.adapters.workbuddy_desktop import WorkBuddyDesktopAdapter, W
 from cowork_runtime.persistence.sqlite_store import SQLiteRuntimeStore
 
 
-def test_workbuddy_unknown_schema_fails_closed(tmp_path: Path) -> None:
+def test_workbuddy_unknown_schema_is_counted_as_unrecognized(tmp_path: Path) -> None:
     store = SQLiteRuntimeStore(tmp_path / "runtime.sqlite3")
     registry = PluginRegistry(store)
     registry.register(PluginManifestV1(
@@ -33,16 +33,17 @@ def test_workbuddy_unknown_schema_fails_closed(tmp_path: Path) -> None:
         "tool_name": "mcp__demo__search",
     }) + "\n", encoding="utf-8")
 
-    with pytest.raises(WorkBuddyParseError, match="unsupported WorkBuddy hook schema"):
-        WorkBuddyDesktopAdapter(registry).read(
-            source,
-            installation_id="install-workbuddy-desktop-1",
-            session_id="session-1",
-        )
+    result = WorkBuddyDesktopAdapter(registry).read(
+        source,
+        installation_id="install-workbuddy-desktop-1",
+        session_id="session-1",
+    )
+    [event] = result.events
+    assert (event.component_kind, event.evidence_level) == ("unknown", "inferred")
     store.close()
 
 
-def test_codex_unknown_tool_payload_fails_closed(tmp_path: Path) -> None:
+def test_codex_unknown_tool_payload_is_counted_as_unrecognized_call(tmp_path: Path) -> None:
     store = SQLiteRuntimeStore(tmp_path / "runtime.sqlite3")
     registry = PluginRegistry(store)
     registry.register(PluginManifestV1(
@@ -55,15 +56,15 @@ def test_codex_unknown_tool_payload_fails_closed(tmp_path: Path) -> None:
     ))
     source = tmp_path / "rollout.jsonl"
     source.write_text(json.dumps({
-        "type": "response_item",
+        "type": "response_item", "timestamp": "2026-10-14T08:00:00.000Z",
         "payload": {"type": "future_mcp_tool_invocation", "call_id": "call-1"},
     }) + "\n", encoding="utf-8")
 
-    with pytest.raises(CodexParseError, match="unsupported Codex tool record format"):
-        CodexIncrementalAdapter(registry).read(
-            source,
-            installation_id="install-codex-1",
-            session_id="session-1",
-        )
+    result = CodexIncrementalAdapter(registry).read(source, installation_id="install-codex-1", session_id="session-1")
+
+    [event] = result.events
+    assert (event.component_kind, event.evidence_level, event.stage) == ("unknown", "inferred", "completed")
+    assert event.component_id == "unrecognized:future_mcp_tool_invocation"
+    assert [d.code for d in result.diagnostics] == ["unrecognized_record"]
     store.close()
 

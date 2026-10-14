@@ -27,6 +27,7 @@ from typing import Any, Iterable
 
 from cowork_contracts import ComponentEventV1
 
+from .degraded import degraded_event
 from .registry import CodexCursor, PluginRegistry
 
 
@@ -503,6 +504,14 @@ def _parse_records(data: bytes, fallback: datetime) -> tuple[list[_ToolRecord], 
     return records, unparsed
 
 
+def _evidence(record: "_ToolRecord") -> str:
+    # A Skill call whose Skill name could not be read is still a Skill call,
+    # but only partially identified.
+    if record.name is not None and record.name.casefold() == "skill" and record.skill is None:
+        return "partial"
+    return "verified"
+
+
 def _collect_records(
     raw: bytes, stream: _Stream, fallback: datetime,
 ) -> tuple[list[_ToolRecord], list[tuple[int, str]], list[str]]:
@@ -572,12 +581,8 @@ class ClaudeDesktopAdapter:
         new_uses = [record for record in records if record.kind == "use" and record.position >= start]
         new_unparsed_uses = [position for position, kind in unparsed if kind == "use" and position >= start]
         # Claude's storage format is private and changes with client releases.
-        # If tool calls are present but none of them can be read, stop instead
-        # of reporting a successful scan with missing events.
-        if new_unparsed_uses and not new_uses:
-            raise ClaudeDesktopParseError(
-                "unsupported Claude Desktop record format", path=str(source), offset=offset
-            )
+        # A tool call this version cannot read is counted as one unrecognized
+        # (inferred) call and reported, instead of stopping the whole source.
         if new_unparsed_uses:
             diagnostics.append(f"unparsed_tool_use_records={len(new_unparsed_uses)}")
 
@@ -590,6 +595,14 @@ class ClaudeDesktopAdapter:
             if event.event_id not in seen:
                 seen.add(event.event_id)
                 events.append(event)
+
+        for position in new_unparsed_uses:
+            emit(degraded_event(
+                runtime="claude", plugin_id="claude-desktop-adapter", installation_id=installation_id,
+                session_id=session_id, run_id=run_id or session_id, native_call=f"{source.name}:{position}",
+                hint="claude_tool_use", occurred_at=_timestamp(data, position, len(data), current),
+                source_type="indexeddb_leveldb", evidence_source="claude_desktop_unrecognized", binding=binding,
+            ))
 
         def component(record: _ToolRecord) -> tuple[str, str, str]:
             assert record.name is not None
@@ -614,7 +627,7 @@ class ClaudeDesktopAdapter:
                 emit(self._event(
                     installation_id, session_id, run, record.call, kind, component_id,
                     "started", record.occurred, starts[record.call].occurred, observation,
-                    "verified", binding,
+                    _evidence(starts[record.call]), binding,
                 ))
                 continue
             started = starts.get(record.call)
@@ -629,7 +642,7 @@ class ClaudeDesktopAdapter:
             stage = "failed" if record.failed else "completed"
             emit(self._event(
                 installation_id, session_id, run, record.call, kind, component_id,
-                stage, record.occurred, started.occurred, observation, "verified", binding,
+                stage, record.occurred, started.occurred, observation, _evidence(started), binding,
             ))
             # Native deferred-tool search is the Claude Desktop signal that a
             # Skill was selected.  Require the Skill to exist in the local
