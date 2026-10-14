@@ -1,0 +1,394 @@
+{
+  "version": "cowork.crawler_capability_catalog.v1",
+  "contract_versions": {
+    "request": "cowork.crawler.v1",
+    "result": "cowork.crawler.v1",
+    "review_evidence": "cowork.crawler.review_evidence.v1"
+  },
+  "capabilities": [
+    {
+      "name": "cowork.web.fetch_page",
+      "display_name": "Fetch web page",
+      "version": "cowork.crawler.v1",
+      "description": "Fetch a single public web page, return bounded readable content, and preserve raw page evidence as artifacts. This is read-only and does not log in or execute page actions.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.fetch_page"] },
+          "url": { "type": "string" },
+          "extraction_schema": { "type": ["object", "null"] },
+          "session_ref": { "type": ["string", "null"] },
+          "source_type": { "type": ["string", "null"] },
+          "respect_robots": { "type": "boolean" },
+          "allow_external_sources": { "type": "boolean" },
+          "interaction_plan": { "type": ["object", "null"] },
+          "metadata": { "type": "object" }
+        },
+        "required": ["request_id", "tool_name", "url"]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.v1"] },
+          "request_id": { "type": "string" },
+          "crawl_job_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.fetch_page"] },
+          "status": { "type": "string" },
+          "pages": { "type": "array" },
+          "summary_text": { "type": ["string", "null"] },
+          "coverage": { "type": ["object", "null"] },
+          "extraction_coverage": { "type": ["object", "null"] },
+          "extraction_records": { "type": "array" },
+          "artifact_refs": { "type": "array" },
+          "evidence_refs": { "type": "array" },
+          "diagnostics": { "type": "array" },
+          "pending_interaction": { "type": ["object", "null"] },
+          "interaction_traces": { "type": "array" },
+          "session_ref": { "type": ["string", "null"] },
+          "metadata": { "type": "object" }
+        },
+        "required": ["version", "request_id", "crawl_job_id", "tool_name", "status"]
+      },
+      "permissions": ["web.crawl.read"],
+      "output_mode": "paged",
+      "max_output_chars": 24000,
+      "spill_threshold_bytes": 131072,
+      "secret_fields": ["session_ref"],
+      "provider_id": "crawler",
+      "execution_location": "hybrid",
+      "side_effect": "none",
+      "idempotency": "none",
+      "timeout_ms": 120000,
+      "availability": "ready",
+      "certification": "tested",
+      "metadata": {
+        "read_only": true,
+        "supports_resume": true,
+        "source_policy": "public_or_authorized"
+      }
+    },
+    {
+      "name": "cowork.web.crawl_site",
+      "display_name": "Crawl web site",
+      "version": "cowork.crawler.v1",
+      "description": "Traverse a bounded set of same-site pages for read-only research and content grounding. This capability reuses the same request/result contract as single-page fetches.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.crawl_site"] },
+          "url": { "type": "string" },
+          "seed_urls": { "type": "array", "items": { "type": "string" } },
+          "query": { "type": ["string", "null"] },
+          "extraction_schema": { "type": ["object", "null"] },
+          "session_ref": { "type": ["string", "null"] },
+          "max_pages": { "type": "integer" },
+          "max_depth": { "type": "integer" },
+          "per_domain_limit": { "type": "integer" },
+          "allowed_domains": { "type": "array", "items": { "type": "string" } },
+          "same_origin": { "type": ["boolean", "null"] },
+          "include_url_patterns": { "type": "array", "items": { "type": "string" } },
+          "exclude_url_patterns": { "type": "array", "items": { "type": "string" } },
+          "respect_robots": { "type": "boolean" },
+          "allow_external_sources": { "type": "boolean" },
+          "source_type": { "type": ["string", "null"] },
+          "interaction_plan": { "type": ["object", "null"] },
+          "metadata": { "type": "object" }
+        },
+        "required": ["request_id", "tool_name", "url"]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.v1"] },
+          "request_id": { "type": "string" },
+          "crawl_job_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.crawl_site"] },
+          "status": { "type": "string" },
+          "pages": { "type": "array" },
+          "summary_text": { "type": ["string", "null"] },
+          "coverage": { "type": ["object", "null"] },
+          "extraction_coverage": { "type": ["object", "null"] },
+          "extraction_records": { "type": "array" },
+          "artifact_refs": { "type": "array" },
+          "evidence_refs": { "type": "array" },
+          "diagnostics": { "type": "array" },
+          "pending_interaction": { "type": ["object", "null"] },
+          "interaction_traces": { "type": "array" },
+          "session_ref": { "type": ["string", "null"] },
+          "metadata": { "type": "object" }
+        },
+        "required": ["version", "request_id", "crawl_job_id", "tool_name", "status"]
+      },
+      "permissions": ["web.crawl.read"],
+      "output_mode": "paged",
+      "max_output_chars": 24000,
+      "spill_threshold_bytes": 131072,
+      "secret_fields": ["session_ref"],
+      "provider_id": "crawler",
+      "execution_location": "hybrid",
+      "side_effect": "none",
+      "idempotency": "none",
+      "timeout_ms": 300000,
+      "availability": "ready",
+      "certification": "tested",
+      "metadata": {
+        "read_only": true,
+        "supports_resume": true,
+        "source_policy": "public_or_authorized"
+      }
+    },
+    {
+      "name": "cowork.web.review.inspect_page",
+      "display_name": "Inspect review page evidence",
+      "version": "cowork.crawler.review_evidence.v1",
+      "description": "Read the Runtime-fixed public product page and return only bounded review structure plus opaque next-step references. No URL, selector, browser session, headers, or endpoint is accepted from the model.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.inspect_page"] }
+        },
+        "required": ["request_id", "tool_name"]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.inspect_page"] },
+          "status": { "type": "string" },
+          "evidence_ref": { "type": ["object", "null"] },
+          "candidates": { "type": "array" },
+          "record_samples": { "type": "array" },
+          "observed_count": { "type": "integer" },
+          "expected_count": { "type": ["integer", "null"] },
+          "page_title": { "type": ["string", "null"] },
+          "diagnostics": { "type": "array" },
+          "metadata": { "type": "object" }
+        },
+        "required": ["version", "request_id", "tool_name", "status", "observed_count", "candidates", "record_samples", "diagnostics", "metadata"]
+      },
+      "permissions": ["web.crawl.read"],
+      "output_mode": "paged",
+      "max_output_chars": 12000,
+      "spill_threshold_bytes": 65536,
+      "secret_fields": [],
+      "provider_id": "crawler",
+      "execution_location": "hybrid",
+      "side_effect": "none",
+      "idempotency": "keyed",
+      "timeout_ms": 120000,
+      "availability": "ready",
+      "certification": "tested",
+      "metadata": { "read_only": true, "review_evidence": true, "phase": "initial" }
+    },
+    {
+      "name": "cowork.web.review.render_page",
+      "display_name": "Render approved review page",
+      "version": "cowork.crawler.review_evidence.v1",
+      "description": "Render only a previously inspected Runtime-owned public page. The input accepts an opaque evidence reference only.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.render_page"] },
+          "candidate_ref": { "type": "string" }
+        },
+        "required": ["request_id", "tool_name", "candidate_ref"]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.render_page"] },
+          "status": { "type": "string" },
+          "evidence_ref": { "type": ["object", "null"] },
+          "candidates": { "type": "array" },
+          "record_samples": { "type": "array" },
+          "observed_count": { "type": "integer" },
+          "expected_count": { "type": ["integer", "null"] },
+          "page_title": { "type": ["string", "null"] },
+          "diagnostics": { "type": "array" },
+          "metadata": { "type": "object" }
+        },
+        "required": ["version", "request_id", "tool_name", "status", "observed_count", "candidates", "record_samples", "diagnostics", "metadata"]
+      },
+      "permissions": ["web.crawl.read"],
+      "output_mode": "paged",
+      "max_output_chars": 12000,
+      "spill_threshold_bytes": 65536,
+      "secret_fields": [],
+      "provider_id": "crawler",
+      "execution_location": "hybrid",
+      "side_effect": "none",
+      "idempotency": "keyed",
+      "timeout_ms": 120000,
+      "availability": "ready",
+      "certification": "tested",
+      "metadata": { "read_only": true, "review_evidence": true, "phase": "replan" }
+    },
+    {
+      "name": "cowork.web.review.select_region",
+      "display_name": "Select approved review region",
+      "version": "cowork.crawler.review_evidence.v1",
+      "description": "Choose one Runtime-discovered review-region candidate from an approved page evidence reference. Selectors are never supplied by the model.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.select_region"] },
+          "evidence_ref": { "type": "string" },
+          "candidate_ref": { "type": "string" }
+        },
+        "required": ["request_id", "tool_name", "evidence_ref", "candidate_ref"]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.select_region"] },
+          "status": { "type": "string" },
+          "evidence_ref": { "type": ["object", "null"] },
+          "candidates": { "type": "array" },
+          "record_samples": { "type": "array" },
+          "observed_count": { "type": "integer" },
+          "expected_count": { "type": ["integer", "null"] },
+          "page_title": { "type": ["string", "null"] },
+          "diagnostics": { "type": "array" },
+          "metadata": { "type": "object" }
+        },
+        "required": ["version", "request_id", "tool_name", "status", "observed_count", "candidates", "record_samples", "diagnostics", "metadata"]
+      },
+      "permissions": ["web.crawl.read"],
+      "output_mode": "paged",
+      "max_output_chars": 12000,
+      "spill_threshold_bytes": 65536,
+      "secret_fields": [],
+      "provider_id": "crawler",
+      "execution_location": "hybrid",
+      "side_effect": "none",
+      "idempotency": "keyed",
+      "timeout_ms": 30000,
+      "availability": "ready",
+      "certification": "tested",
+      "metadata": { "read_only": true, "review_evidence": true, "phase": "replan" }
+    },
+    {
+      "name": "cowork.web.review.fetch_next_page",
+      "display_name": "Fetch approved next review page",
+      "version": "cowork.crawler.review_evidence.v1",
+      "description": "Follow one Runtime-discovered same-origin review pagination candidate. The model cannot provide or alter a URL or endpoint.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.fetch_next_page"] },
+          "candidate_ref": { "type": "string" }
+        },
+        "required": ["request_id", "tool_name", "candidate_ref"]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.fetch_next_page"] },
+          "status": { "type": "string" },
+          "evidence_ref": { "type": ["object", "null"] },
+          "candidates": { "type": "array" },
+          "record_samples": { "type": "array" },
+          "observed_count": { "type": "integer" },
+          "expected_count": { "type": ["integer", "null"] },
+          "page_title": { "type": ["string", "null"] },
+          "diagnostics": { "type": "array" },
+          "metadata": { "type": "object" }
+        },
+        "required": ["version", "request_id", "tool_name", "status", "observed_count", "candidates", "record_samples", "diagnostics", "metadata"]
+      },
+      "permissions": ["web.crawl.read"],
+      "output_mode": "paged",
+      "max_output_chars": 12000,
+      "spill_threshold_bytes": 65536,
+      "secret_fields": [],
+      "provider_id": "crawler",
+      "execution_location": "hybrid",
+      "side_effect": "none",
+      "idempotency": "keyed",
+      "timeout_ms": 120000,
+      "availability": "ready",
+      "certification": "tested",
+      "metadata": { "read_only": true, "review_evidence": true, "phase": "replan" }
+    },
+    {
+      "name": "cowork.web.review.extract_candidates",
+      "display_name": "Extract approved review candidates",
+      "version": "cowork.crawler.review_evidence.v1",
+      "description": "Return a bounded, de-identified sample from one Runtime-selected review region. This does not create a DatasetVersion or commit facts.",
+      "input_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.extract_candidates"] },
+          "candidate_ref": { "type": "string" }
+        },
+        "required": ["request_id", "tool_name", "candidate_ref"]
+      },
+      "output_schema": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "version": { "type": "string", "enum": ["cowork.crawler.review_evidence.v1"] },
+          "request_id": { "type": "string" },
+          "tool_name": { "type": "string", "enum": ["cowork.web.review.extract_candidates"] },
+          "status": { "type": "string" },
+          "evidence_ref": { "type": ["object", "null"] },
+          "candidates": { "type": "array" },
+          "record_samples": { "type": "array" },
+          "observed_count": { "type": "integer" },
+          "expected_count": { "type": ["integer", "null"] },
+          "page_title": { "type": ["string", "null"] },
+          "diagnostics": { "type": "array" },
+          "metadata": { "type": "object" }
+        },
+        "required": ["version", "request_id", "tool_name", "status", "observed_count", "candidates", "record_samples", "diagnostics", "metadata"]
+      },
+      "permissions": ["web.crawl.read"],
+      "output_mode": "paged",
+      "max_output_chars": 12000,
+      "spill_threshold_bytes": 65536,
+      "secret_fields": [],
+      "provider_id": "crawler",
+      "execution_location": "hybrid",
+      "side_effect": "none",
+      "idempotency": "keyed",
+      "timeout_ms": 30000,
+      "availability": "ready",
+      "certification": "tested",
+      "metadata": { "read_only": true, "review_evidence": true, "phase": "replan" }
+    }
+  ]
+}

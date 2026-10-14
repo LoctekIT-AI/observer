@@ -1,0 +1,11 @@
+{
+  "name": "@observer/dsh-observer",
+  "version": "0.2.0",
+  "description": "Metadata-only Observer for native DSH tool results and explicit Skill invocations",
+  "type": "module",
+  "main": "index.mjs",
+  "exports": { ".": "./index.mjs", "./package.json": "./package.json", "./cordis.patch.yml": "./cordis.patch.yml" },
+  "files": ["index.mjs", "cordis.patch.yml", "README.md"],
+  "engines": { "node": ">=24" },
+  "dsh": { "bundle": { "patch": "./cordis.patch.yml" } }
+}

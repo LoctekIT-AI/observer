@@ -1,0 +1,12 @@
+# Exact native Observer runtime versions; no global Python packages required.
+pydantic==2.13.4
+pydantic-core==2.46.4
+PyYAML==6.0.3
+jsonschema==4.26.0
+attrs==26.1.0
+jsonschema-specifications==2025.9.1
+referencing==0.37.0
+rpds-py==2026.6.3
+annotated-types==0.7.0
+typing-extensions==4.15.0
+typing-inspection==0.4.2

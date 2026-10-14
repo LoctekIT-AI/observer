@@ -49,6 +49,18 @@ AI 会先向你说明上面这些内容，并告诉你检测到了哪些客户�
 3. **执行。** 按 zip 内 `README.md` 的 **One-sentence installation** 一节执行。安装程序使用默认路径和飞书登录，不需要向用户要路径、ID 或密钥；如需任何密钥，那一定是出错了，应停止并告诉用户。
 4. **如实报告。** 把每个客户端的安装结果（成功或失败及原因）告诉用户，不要隐瞒失败。
 
+## 源码与打包
+
+- `bundle/`：安装包的全部源码，内容就是 Releases 里 zip 解压后的样子（`README.md` 是给安装程序和 AI 助手看的安装说明）。源码里默认连接公司正式站。
+- `tools/build_bundle.py`：从 `bundle/` 打出安装包和 `.sha256`。同样的源码和版本号，打出来的 zip 完全相同，可以用来核对 Releases 里的安装包：
+
+  ```bash
+  python3 tools/build_bundle.py --version 0.2.25 --test   # 测试版（连接 192.168.17.121），结果与 v0.2.25-test 的 SHA-256 一致
+  python3 tools/build_bundle.py --version 0.2.26          # 正式版
+  ```
+
+- 每次改动后打包都必须提高版本号，否则已安装的电脑不会启用新版本。
+
 ## 当前版本
 
 - `v0.2.25-test`（测试版，pre-release）：只连接测试环境 `192.168.17.121`，用于验收。已在 macOS 和 Windows 10 实机验证（Windows 上 Codex、WorkBuddy、DSH（DeepSeek Harness）已通过，Claude 待测）。

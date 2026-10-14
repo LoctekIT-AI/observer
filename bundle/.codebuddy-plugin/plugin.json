@@ -1,0 +1,9 @@
+{
+  "name": "skill-mcp-observer",
+  "description": "Records metadata-only WorkBuddy Code tool lifecycle evidence for the local Observer.",
+  "version": "0.2.25",
+  "author": {
+    "name": "Observer"
+  },
+  "hooks": "./hooks/hooks.json"
+}

@@ -1,0 +1,80 @@
+{
+  "name": "skill-mcp-observer",
+  "version": "0.2.25",
+  "description": "Records metadata-only local Codex tool lifecycle evidence for the Observer.",
+  "hooks": {
+    "hooks": {
+      "SessionStart": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "python3 \"${PLUGIN_ROOT}/scripts/codex_skill_hook_bridge.py\" --stage session_started --output \"${PLUGIN_DATA}/codex-hook-events.jsonl\"",
+              "timeout": 5
+            }
+          ]
+        }
+      ],
+      "PreToolUse": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "python3 \"${PLUGIN_ROOT}/scripts/codex_skill_hook_bridge.py\" --stage started --output \"${PLUGIN_DATA}/codex-hook-events.jsonl\"",
+              "timeout": 5
+            }
+          ]
+        }
+      ],
+      "PostToolUse": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "python3 \"${PLUGIN_ROOT}/scripts/codex_skill_hook_bridge.py\" --stage completed --output \"${PLUGIN_DATA}/codex-hook-events.jsonl\"",
+              "timeout": 5
+            }
+          ]
+        }
+      ],
+      "Stop": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "python3 \"${PLUGIN_ROOT}/scripts/codex_skill_hook_bridge.py\" --stage turn_completed --output \"${PLUGIN_DATA}/codex-hook-events.jsonl\"",
+              "timeout": 5
+            }
+          ]
+        }
+      ],
+      "Interrupt": [
+        {
+          "hooks": [
+            {
+              "type": "command",
+              "command": "python3 \"${PLUGIN_ROOT}/scripts/codex_skill_hook_bridge.py\" --stage cancelled --output \"${PLUGIN_DATA}/codex-hook-events.jsonl\"",
+              "timeout": 5
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "author": {
+    "name": "Observer"
+  },
+  "interface": {
+    "displayName": "Skill/MCP Observer",
+    "shortDescription": "Observe local tool lifecycle metadata",
+    "longDescription": "Collects metadata-only local Codex tool lifecycle evidence for the Observer.",
+    "developerName": "Observer",
+    "category": "Productivity",
+    "capabilities": [
+      "Read"
+    ],
+    "defaultPrompt": [
+      "Inspect local tool lifecycle evidence"
+    ]
+  }
+}

@@ -1,0 +1,3 @@
+- insert:
+    - id: dsh-observer
+      name: '@observer/dsh-observer'
