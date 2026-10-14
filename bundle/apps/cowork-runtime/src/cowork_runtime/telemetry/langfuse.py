@@ -290,6 +290,10 @@ class LangfuseExporter:
 
     def export(self, event: ComponentEventV1) -> LangfuseExportResult:
         body, trace_id, span_id = _payload(event)
+        return self.export_body(body, trace_id=trace_id, span_id=span_id)
+
+    def export_body(self, body: dict[str, Any], *, trace_id: str, span_id: str) -> LangfuseExportResult:
+        """Send one already-built, metadata-only OTLP/JSON payload (e.g. a health record)."""
         encoded = json.dumps(body, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         if self.config.observer_auth is not None:
             try:
