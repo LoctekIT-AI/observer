@@ -9,7 +9,9 @@ param(
     [string]$AuthOrigin = 'https://itsub.loctek.com/observer',
     [string[]]$Hosts = @(),
     [ValidateSet('install','status')][string]$Mode = 'install',
-    [switch]$DetectOnly
+    [switch]$DetectOnly,
+    # Used by the self-updater: never open a login page, skip clients that are no longer installed.
+    [switch]$Unattended
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'observer_windows_common.ps1')
@@ -70,13 +72,16 @@ if ($selected.Count -eq 0) { throw 'No supported desktop AI client was detected'
 if ($Mode -eq 'install' -and -not $Archive) { throw '-Archive is required for install' }
 $single = Join-Path $PSScriptRoot 'install_observer_windows.ps1'
 foreach ($hostId in $selected) {
-    if (-not $detected[$hostId]) { throw "Selected client $hostId was not detected on this machine" }
+    if (-not $detected[$hostId]) {
+        if ($Unattended) { Write-Output "=== skip $hostId (not detected on this machine)"; continue }
+        throw "Selected client $hostId was not detected on this machine"
+    }
     $common = @{
         HostId = $hostId; Mode = $Mode; ConfigFile = $ConfigFile; AuthOrigin = $AuthOrigin
         PluginDirectory = (Join-Path $Root 'bundle'); RuntimeDirectory = (Join-Path $Root 'runtime')
         StateDirectory = (Join-Path $Root "state\$hostId")
     }
-    if ($Mode -eq 'install') { $common.Archive = $Archive; $common.Authorize = $true }
+    if ($Mode -eq 'install') { $common.Archive = $Archive; if (-not $Unattended) { $common.Authorize = $true } }
     switch ($hostId) {
         'codex' { $common.SourceRoot = $codexSource }
         'claude' { $common.SourceRoot = $claudeSource }
@@ -89,4 +94,12 @@ foreach ($hostId in $selected) {
     }
     Write-Output "=== $Mode $hostId"
     & $single @common
+}
+if ($Mode -eq 'install') {
+    # Signed self-update (scripts\observer_update.py). The collectors keep working without it.
+    try {
+        & (Join-Path $PSScriptRoot 'register_observer_updater_windows.ps1') -Mode install -PythonExecutable (Join-Path $Root 'runtime\venv\Scripts\python.exe') -UpdaterScript (Join-Path $Root 'bundle\scripts\observer_update.py') -StateDirectory (Join-Path $Root 'updater')
+    } catch {
+        Write-Warning "Observer: the self-update task could not be registered: $($_.Exception.Message)"
+    }
 }

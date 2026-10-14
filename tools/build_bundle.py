@@ -4,6 +4,11 @@
     python3 tools/build_bundle.py --version 0.2.26                 # production package
     python3 tools/build_bundle.py --version 0.2.26 --test          # test package (192.168.17.121)
 
+Self-update: update.json in the package names the repository and channel the
+installed updater follows, and the channel's public key from
+tools/update-keys/<channel>.pub ("test" for --test builds, "release" otherwise).
+Without a key file for the channel the package's updater stays disabled.
+
 The source in bundle/ always carries the production authorization origin. A test
 build replaces it with the test origin and marks the README as a test build.
 
@@ -31,6 +36,7 @@ PRODUCTION_ORIGIN = "https://itsub.loctek.com/observer"
 TEST_ORIGIN = "http://192.168.17.121:38090/observer"
 FORBIDDEN_IN_TEST = (b"itsub.loctek.com", b"ai-os-test", b"ai-hubs")
 SKIP_PARTS = {"__pycache__", ".DS_Store", ".pytest_cache"}
+UPDATE_KEYS = ROOT / "tools" / "update-keys"
 
 
 def collect() -> dict[str, bytes]:
@@ -44,7 +50,24 @@ def collect() -> dict[str, bytes]:
     return files
 
 
-def build(version: str, *, test: bool, out_dir: Path) -> Path:
+def update_settings(files: dict[str, bytes], *, test: bool, repo: str | None) -> None:
+    settings = json.loads(files["update.json"])
+    channel = "test" if test else "release"
+    key_file = UPDATE_KEYS / f"{channel}.pub"
+    key = key_file.read_text(encoding="utf-8").strip() if key_file.is_file() else ""
+    if key and not re.fullmatch(r"[0-9a-f]{64}", key):
+        raise SystemExit(f"{key_file} must hold a 64-character hex Ed25519 public key")
+    if test and not key:
+        raise SystemExit(f"test builds need {key_file} (see tools/sign_channel.py keygen)")
+    if not key:
+        print(f"warning: no {key_file}; self-update is disabled in this package", file=sys.stderr)
+    settings.update(channel=channel, public_key=key)
+    if repo:
+        settings["repo"] = repo
+    files["update.json"] = (json.dumps(settings, indent=2, sort_keys=True) + "\n").encode()
+
+
+def build(version: str, *, test: bool, out_dir: Path, repo: str | None = None) -> Path:
     if not re.fullmatch(r"\d+\.\d+\.\d+", version):
         raise SystemExit("--version must look like 0.2.26")
     files = collect()
@@ -60,6 +83,8 @@ def build(version: str, *, test: bool, out_dir: Path) -> Path:
         if count != 1:
             raise SystemExit(f"no version field in {name}")
         files[name] = text.encode()
+
+    update_settings(files, test=test, repo=repo)
 
     readme = files["README.md"].decode()
     if not readme.startswith("# Observer\n"):
@@ -101,8 +126,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", required=True, help="bundle version, e.g. 0.2.26 (raise it for every build)")
     parser.add_argument("--test", action="store_true", help="test build for the 192.168.17.121 environment")
     parser.add_argument("--out", type=Path, default=ROOT / "dist", help="output directory (default: dist/)")
+    parser.add_argument("--update-repo", help="owner/repo the installed updater follows (default: bundle/update.json)")
     args = parser.parse_args(argv)
-    build(args.version, test=args.test, out_dir=args.out)
+    build(args.version, test=args.test, out_dir=args.out, repo=args.update_repo)
     return 0
 
 

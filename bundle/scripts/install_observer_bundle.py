@@ -633,6 +633,13 @@ def _uninstall(args: argparse.Namespace) -> int:
     if any(remaining.values()):
         _write_membership(install_root, remaining)
         return _report(args, {"status": "ok", "changed": True, "install_root": str(install_root), "hosts": hosts, "outbox": outbox_result, "state_preserved": True, "shared_files_preserved": True, "membership": remaining})
+    if sys.platform == "darwin" and not args.launch_agent_dir:
+        # The last client is gone: remove the self-update LaunchAgent as well.
+        try:
+            import observer_update
+            observer_update.unregister_macos()
+        except Exception as exc:  # the collectors are already removed; report and continue
+            print(f"warning: Observer updater could not be removed: {type(exc).__name__}", file=sys.stderr)
     try:
         shutil.rmtree(install_root)
     except OSError as exc:

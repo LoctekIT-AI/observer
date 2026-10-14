@@ -18,6 +18,7 @@ from uuid import uuid4
 from cowork_contracts import COMPONENT_EVENT_CONTRACT_VERSION, PluginManifestV1
 
 from ..adapters.degraded import is_degraded
+from .replay import ReplayLedger, apply_due
 from ..adapters.delivery import ComponentEventDelivery
 from ..adapters.registry import CodexCursor, PluginRegistry
 from ..adapters.workbuddy_desktop import WorkBuddyDesktopAdapter
@@ -87,6 +88,10 @@ class WorkBuddyDesktopObserverWorker:
         self.flush_enabled = flush
         self.health = HealthReporter(self.state_dir, "workbuddy", enabled=flush)
         self._unrecognized = 0
+        self.replay = ReplayLedger(self.state_dir)
+        self._replay_checked = False
+        self._replayed = 0
+        self._guarded: set[str] = set()
         self.store = SQLiteRuntimeStore(self.state_dir / "observer.sqlite3")
         self.registry = PluginRegistry(self.store)
         self.adapter = WorkBuddyDesktopAdapter(self.registry)
@@ -184,8 +189,20 @@ class WorkBuddyDesktopObserverWorker:
                 initialized += 1
         return initialized
 
+    def _apply_replay(self) -> None:
+        # Once per process: a newer version re-reads where an older one could not.
+        if self._replay_checked:
+            return
+        self._replay_checked = True
+        rewound, guarded = apply_due(self.replay, self.registry, _file_identity)
+        self._replayed += rewound
+        self._guarded |= guarded
+
     def _process(self, source: Path, session_id: str) -> tuple[int, int]:
         installation_id = self._register(session_id)
+        identity = _file_identity(source)
+        cursor = self.registry.cursor(installation_id, str(source))
+        start = cursor.offset if cursor and cursor.file_identity == identity else 0
         result = self.adapter.read(
             source,
             installation_id=installation_id,
@@ -196,7 +213,10 @@ class WorkBuddyDesktopObserverWorker:
         # Malformed source lines the adapter had to skip stay visible in status.json.
         self._skipped_records = getattr(self, "_skipped_records", 0) + len(result.diagnostics)
         events = [event for event in result.events if event.component_kind in {"skill", "mcp_tool"} or is_degraded(event)]
-        self._unrecognized += sum(1 for event in events if is_degraded(event) and event.stage != "started")
+        degraded = sum(1 for event in events if is_degraded(event) and event.stage != "started")
+        self._unrecognized += degraded
+        if degraded:
+            self.replay.note(installation_id, str(source), identity, start)
         terminal = 0
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})
@@ -236,6 +256,7 @@ class WorkBuddyDesktopObserverWorker:
             sessions = self._session_ids(source)
             initialized = self._initialize(source, sessions, marker, previous_high_water)
             if marker.get("complete"):
+                self._apply_replay()
                 for session_id in sessions:
                     found, queued = self._process(source, session_id)
                     events += found
@@ -266,8 +287,9 @@ class WorkBuddyDesktopObserverWorker:
             "outbox": self.outbox.count_by_status(),
         }
         _atomic_json(self.state_dir / "status.json", status)
-        self.health.observe(status, unrecognized_calls=self._unrecognized)
+        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed)
         self._unrecognized = 0
+        self._replayed = 0
         return report
 
     def run_once(self) -> WorkBuddyObserverRun:

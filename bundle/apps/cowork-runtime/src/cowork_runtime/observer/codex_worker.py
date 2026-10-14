@@ -19,6 +19,7 @@ from cowork_contracts import COMPONENT_EVENT_CONTRACT_VERSION, PluginManifestV1
 
 from ..adapters.codex import CodexIncrementalAdapter
 from ..adapters.degraded import is_degraded
+from .replay import ReplayLedger, apply_due
 from ..adapters.delivery import ComponentEventDelivery
 from ..adapters.registry import CodexCursor, PluginRegistry
 from ..persistence.sqlite_store import SQLiteRuntimeStore
@@ -112,6 +113,10 @@ class CodexObserverWorker:
         self.flush_enabled = flush
         self.health = HealthReporter(self.state_dir, "codex", enabled=flush)
         self._unrecognized = 0
+        self.replay = ReplayLedger(self.state_dir)
+        self._replay_checked = False
+        self._replayed = 0
+        self._guarded: set[str] = set()
         self.store = SQLiteRuntimeStore(self.state_dir / "observer.sqlite3")
         self.registry = PluginRegistry(self.store)
         if self.store.get_adapter_plugin(PLUGIN_ID, INSTALLATION_ID) is None:
@@ -199,22 +204,37 @@ class CodexObserverWorker:
         self._installed_at = datetime.fromisoformat(installation["created_at"])
         return initialized
 
+    def _apply_replay(self) -> None:
+        # Once per process: a newer version re-reads where an older one could not.
+        if self._replay_checked:
+            return
+        self._replay_checked = True
+        rewound, guarded = apply_due(self.replay, self.registry, _file_identity)
+        self._replayed += rewound
+        self._guarded |= guarded
+
     def _process(self, source: Path) -> tuple[int, int]:
         cursor = self.registry.cursor(INSTALLATION_ID, str(source))
-        if cursor and cursor.file_identity == _file_identity(source) and cursor.offset == source.stat().st_size:
+        identity = _file_identity(source)
+        if cursor and cursor.file_identity == identity and cursor.offset == source.stat().st_size:
             return 0, 0
+        start = cursor.offset if cursor and cursor.file_identity == identity else 0
         result = self.adapter.read(source, installation_id=INSTALLATION_ID,
                                    session_id=_session_id(source), persist_cursor=False)
         terminal = 0
         # An archived rollout seen for the first time is read from its start;
         # never report calls from before the installation (old archived threads).
         archived = "archived_sessions" in source.parts
-        installed_at = getattr(self, "_installed_at", None) if cursor is None and archived else None
+        guarded = (cursor is None and archived) or str(source) in self._guarded
+        installed_at = getattr(self, "_installed_at", None) if guarded else None
         events = [
             event for event in result.events
             if (event.component_kind in {"skill", "mcp_tool"} or is_degraded(event)) and (installed_at is None or event.occurred_at >= installed_at)
         ]
-        self._unrecognized += sum(1 for event in events if is_degraded(event) and event.stage != "started")
+        degraded = sum(1 for event in events if is_degraded(event) and event.stage != "started")
+        self._unrecognized += degraded
+        if degraded:
+            self.replay.note(INSTALLATION_ID, str(source), identity, start, guarded=installed_at is not None)
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})
             self.delivery.deliver(safe)
@@ -223,6 +243,7 @@ class CodexObserverWorker:
                 terminal += 1
         # ledger 和 outbox 都成功后才提交 cursor，重复投影依靠现有 event_id 去重。
         self.registry.save_cursor(result.next_cursor)
+        self._guarded.discard(str(source))
         return len(events), terminal
 
     def _flush(self) -> None:
@@ -248,6 +269,7 @@ class CodexObserverWorker:
         try:
             files = self._files()
             initialized = self._initialize_high_water(files)
+            self._apply_replay()
         except (OSError, ValueError, RuntimeError) as exc:
             errors.append(self._error("source_unavailable", self.source_root, exc))
         if not errors:
@@ -271,8 +293,9 @@ class CodexObserverWorker:
             "errors": errors, "outbox": self.outbox.count_by_status(),
         }
         _atomic_json(self.state_dir / "status.json", status)
-        self.health.observe(status, unrecognized_calls=self._unrecognized)
+        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed)
         self._unrecognized = 0
+        self._replayed = 0
         return run
 
     def run_once(self) -> CodexObserverRun:

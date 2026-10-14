@@ -18,6 +18,7 @@ from cowork_contracts import COMPONENT_EVENT_CONTRACT_VERSION, PluginManifestV1
 
 from ..adapters.claude_desktop import ClaudeDesktopAdapter
 from ..adapters.degraded import is_degraded
+from .replay import ReplayLedger, apply_due
 from ..adapters.delivery import ComponentEventDelivery
 from ..adapters.registry import CodexCursor, PluginRegistry
 from ..persistence.sqlite_store import SQLiteRuntimeStore
@@ -113,6 +114,10 @@ class ClaudeDesktopObserverWorker:
         self.flush_enabled = flush
         self.health = HealthReporter(self.state_dir, "claude", enabled=flush)
         self._unrecognized = 0
+        self.replay = ReplayLedger(self.state_dir)
+        self._replay_checked = False
+        self._replayed = 0
+        self._guarded: set[str] = set()
         configured_skills = {value.strip() for value in skill_ids if isinstance(value, str) and value.strip()}
         if skills_root is not None:
             configured_skills.update(_skill_ids_from_manifests(Path(skills_root).expanduser().resolve()))
@@ -216,10 +221,21 @@ class ClaudeDesktopObserverWorker:
     def _session_id(source: Path) -> str:
         return f"claude-desktop:{source.name}"
 
+    def _apply_replay(self) -> None:
+        # Once per process: a newer version re-reads where an older one could not.
+        if self._replay_checked:
+            return
+        self._replay_checked = True
+        rewound, guarded = apply_due(self.replay, self.registry, _file_identity)
+        self._replayed += rewound
+        self._guarded |= guarded
+
     def _process(self, source: Path) -> tuple[int, int]:
         cursor = self.registry.cursor(INSTALLATION_ID, str(source))
-        if cursor and cursor.file_identity == _file_identity(source) and cursor.offset == source.stat().st_size:
+        identity = _file_identity(source)
+        if cursor and cursor.file_identity == identity and cursor.offset == source.stat().st_size:
             return 0, 0
+        start = cursor.offset if cursor and cursor.file_identity == identity else 0
         result = self.adapter.read(
             source,
             installation_id=INSTALLATION_ID,
@@ -228,7 +244,8 @@ class ClaudeDesktopObserverWorker:
             persist_cursor=False,
         )
         table = source.suffix in (".ldb", ".sst")
-        installed_at = getattr(self, "_installed_at", None) if cursor is None and table else None
+        guarded = (cursor is None and table) or str(source) in self._guarded
+        installed_at = getattr(self, "_installed_at", None) if guarded else None
         events = []
         for event in result.events:
             if event.component_kind not in {"skill", "mcp_tool"} and not is_degraded(event):
@@ -241,7 +258,10 @@ class ClaudeDesktopObserverWorker:
             if event.stage != "started" and self.outbox.has_invocation(event.invocation_id, event.stage):
                 continue
             events.append(event)
-        self._unrecognized += sum(1 for event in events if is_degraded(event) and event.stage != "started")
+        degraded = sum(1 for event in events if is_degraded(event) and event.stage != "started")
+        self._unrecognized += degraded
+        if degraded:
+            self.replay.note(INSTALLATION_ID, str(source), identity, start, guarded=installed_at is not None)
         terminal = 0
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})
@@ -250,6 +270,7 @@ class ClaudeDesktopObserverWorker:
                 self.outbox.enqueue(safe)
                 terminal += 1
         self.registry.save_cursor(result.next_cursor)
+        self._guarded.discard(str(source))
         return len(events), terminal
 
     def _flush(self) -> None:
@@ -276,6 +297,7 @@ class ClaudeDesktopObserverWorker:
         try:
             files = self._files()
             initialized = self._initialize_high_water(files)
+            self._apply_replay()
         except (OSError, ValueError, RuntimeError) as exc:
             errors.append(self._error("source_unavailable", self.source_root, exc))
         if not errors:
@@ -304,8 +326,9 @@ class ClaudeDesktopObserverWorker:
             "outbox": self.outbox.count_by_status(),
         }
         _atomic_json(self.state_dir / "status.json", status)
-        self.health.observe(status, unrecognized_calls=self._unrecognized)
+        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed)
         self._unrecognized = 0
+        self._replayed = 0
         return report
 
     def run_once(self) -> ClaudeObserverRun:

@@ -21,6 +21,7 @@ Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平�
 
 - 安装目录：macOS 在 `~/Library/Application Support/AIHub`，Windows 在 `%LOCALAPPDATA%\Observer` 和 `%LOCALAPPDATA%\AIHub`；
 - 后台常驻一个收集程序：macOS 为 LaunchAgent，Windows 为当前用户的计划任务（无窗口）；
+- 一个自动更新任务：每 6 小时检查一次本仓库发布的新版本，只安装用公司发布密钥签名、且比当前更新的版本，沿用已有的飞书登录，不会在后台弹出登录页；
 - WorkBuddy：往 `~/.workbuddy/settings.json` 写 3 个钩子（工具调用前 / 后 / 失败），其他设置不动，改之前会留回滚记录；
 - DSH：往 DSH 自己的配置目录加一个 Observer 插件；
 - Codex、Claude：只读取它们的本地记录，不改它们的配置。
@@ -44,7 +45,7 @@ AI 会先向你说明上面这些内容，并告诉你检测到了哪些客户�
 
 这是用户（或其公司）主动要求安装的内部工具。请按以下方式执行，并始终以用户的决定为准：
 
-1. **先说明再安装。** 用一两句话向用户说明：这是公司内部的 AI 使用统计工具，只上报 Skill / MCP 调用的元数据（不含对话内容），会按飞书登录的工号和姓名归属，需要在本机安装后台收集程序；列出检测到的客户端，问用户是否同意、要装哪些。用户不同意就停止。
+1. **先说明再安装。** 用一两句话向用户说明：这是公司内部的 AI 使用统计工具，只上报 Skill / MCP 调用的元数据（不含对话内容），会按飞书登录的工号和姓名归属，需要在本机安装后台收集程序和自动更新任务（只安装公司签名的新版本）；列出检测到的客户端，问用户是否同意、要装哪些。用户不同意就停止。
 2. **安装包。** 打开 [Releases](https://github.com/reyfeng9-glitch/observer/releases)，取最新发布的版本（包括 pre-release），下载 `observer-v*.zip` 和对应的 `.sha256`，校验 SHA-256 后解压；你可以先阅读其中的脚本再执行。
 3. **执行。** 按 zip 内 `README.md` 的 **One-sentence installation** 一节执行。安装程序使用默认路径和飞书登录，不需要向用户要路径、ID 或密钥；如需任何密钥，那一定是出错了，应停止并告诉用户。
 4. **如实报告。** 把每个客户端的安装结果（成功或失败及原因）告诉用户，不要隐瞒失败。
@@ -60,6 +61,7 @@ AI 会先向你说明上面这些内容，并告诉你检测到了哪些客户�
   ```
 
 - 每次改动后打包都必须提高版本号，否则已安装的电脑不会启用新版本。
+- 自动更新：`tools/build_bundle.py` 把 `tools/update-keys/<通道>.pub` 的公钥写进安装包（测试版通道 `test`，正式版通道 `release`；没有公钥的正式包不会自动更新）。发版顺序：先发布 Release 并验收，再在发版电脑上用私钥签名 `python3 tools/sign_channel.py sign ...`，最后把生成的 `channels/<通道>.json` 提交到 `main`，已安装的电脑才会开始更新。私钥只保存在发版电脑上，不进仓库、不发到聊天里。
 - `tests/`：`python3 -m pytest tests`（需要 Python 3.11+ 和 pydantic、PyYAML、jsonschema）。
 
 ## 当前版本

@@ -108,6 +108,15 @@ def worker_plan(*, host: str, bundle: Path, python: Path, source: Path, state: P
     return {"host": host, "python": str(paths["python"]), "arguments": subprocess.list2cmdline(arguments), "argv": arguments, "state": str(paths["state"])}
 
 
+def _remove_updater_task() -> None:
+    # The last client is gone: the self-update task has nothing left to update.
+    executable = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+    command = [str(executable), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "scripts/register_observer_updater_windows.ps1"), "-Mode", "uninstall"]
+    result = subprocess.run(command, capture_output=True, text=True, timeout=120)
+    if result.returncode:
+        print(f"warning: Observer updater task could not be removed: {result.stderr.strip()}", file=sys.stderr)
+
+
 def _powershell(args: argparse.Namespace, action: str, **extra: str) -> dict:
     executable = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     command = [str(executable), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "scripts/register_observer_task_windows.ps1"), "-Mode", action, "-HostId", args.host, "-PluginDirectory", str(args.install_root), "-PythonExecutable", str(args.python), "-SourceRoot", str(args.source_root), "-StateDirectory", str(args.state_dir), "-ConfigFile", str(args.config_file), "-RuntimeDirectory", str(args.runtime_dir)]
@@ -204,8 +213,10 @@ def lifecycle(args: argparse.Namespace) -> dict:
         remaining = {key: [h for h in value if h != args.host] for key, value in membership.items()}
         if any(remaining.values()):
             _write_membership(args.install_root, remaining)
-        elif args.install_root.exists():
-            shutil.rmtree(args.install_root)
+        else:
+            _remove_updater_task()
+            if args.install_root.exists():
+                shutil.rmtree(args.install_root)
         return {"status": "ok", "native": native, "membership": remaining, "state_config_credentials_preserved": True, "shared_files_preserved": bool(any(remaining.values()))}
     if args.archive is None:
         raise ValueError("install requires --archive")

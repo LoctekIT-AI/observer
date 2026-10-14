@@ -23,6 +23,7 @@ from ..telemetry.emitter import EventStoreTraceEmitter
 from ..telemetry.identity import ObserverIdentity
 from ..telemetry.langfuse import LangfuseConfig, LangfuseExporter
 from ..telemetry.health import HealthReporter
+from .replay import ReplayLedger, apply_due
 from ..telemetry.langfuse_outbox import LangfuseContentOutbox
 
 
@@ -31,6 +32,11 @@ class DshObserverRun:
     files: int
     events: int
     terminal_enqueued: int
+
+
+def _identity(path: Path) -> str:
+    stat = path.stat()
+    return f"{stat.st_dev}:{stat.st_ino}"
 
 
 def _atomic_status(path: Path, payload: dict[str, object]) -> None:
@@ -57,6 +63,9 @@ class DshObserverWorker:
         self.flush_enabled = flush
         self.health = HealthReporter(self.state_dir, "dsh", enabled=flush)
         self._unrecognized = 0
+        self.replay = ReplayLedger(self.state_dir)
+        self._replay_checked = False
+        self._replayed = 0
         self.store = SQLiteRuntimeStore(self.state_dir / "observer.sqlite3")
         self.registry = PluginRegistry(self.store)
         self.outbox = LangfuseContentOutbox(self.state_dir / "langfuse-content-outbox.sqlite3")
@@ -97,15 +106,22 @@ class DshObserverWorker:
 
     def _poll(self) -> DshObserverRun:
         files = self._files()
+        if not self._replay_checked:
+            # Once per process: a newer version re-reads lines an older one skipped.
+            self._replay_checked = True
+            self._replayed += apply_due(self.replay, self.registry, _identity)[0]
         events = 0
         queued_before = sum(self.outbox.count_by_status().values())
         for path in files:
             stat = path.stat()
-            identity = f"{stat.st_dev}:{stat.st_ino}"
+            identity = _identity(path)
             cursor = self.registry.cursor(self.reader_id, str(path))
             offset = cursor.offset if cursor and cursor.file_identity == identity and cursor.offset <= stat.st_size else 0
+            line_start = offset
             for event, next_offset in self.adapter.read(path, offset=offset):
-                if event is None:  # skipped line: just move past it
+                if event is None:  # skipped line: remember it for the next version, move past it
+                    self.replay.note(self.reader_id, str(path), identity, line_start)
+                    line_start = next_offset
                     self.registry.save_cursor(CodexCursor(self.reader_id, str(path), identity, next_offset, datetime.now(timezone.utc)))
                     continue
                 self._unrecognized += int(event.component_kind == "unknown")
@@ -120,6 +136,7 @@ class DshObserverWorker:
                 inserted = self.store.latest_seq(event.run_id) > before
                 events += int(inserted)
                 self.registry.save_cursor(CodexCursor(self.reader_id, str(path), identity, next_offset, datetime.now(timezone.utc)))
+                line_start = next_offset
         terminals = sum(self.outbox.count_by_status().values()) - queued_before
         if self.flush_enabled:
             result = self.outbox.flush(LangfuseExporter(LangfuseConfig.from_env()).export, owner_id=f"dsh-observer-{os.getpid()}-{uuid4().hex}")
@@ -143,8 +160,9 @@ class DshObserverWorker:
             "checked_at": datetime.now(timezone.utc).isoformat(), "outbox": self.outbox.count_by_status(), **fields,
         }
         _atomic_status(self.state_dir / "status.json", payload)
-        self.health.observe(payload, unrecognized_calls=self._unrecognized)
+        self.health.observe(payload, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed)
         self._unrecognized = 0
+        self._replayed = 0
 
     def run_once(self) -> DshObserverRun:
         with self._single_instance():

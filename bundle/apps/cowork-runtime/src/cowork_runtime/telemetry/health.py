@@ -23,7 +23,7 @@ from typing import Any, Callable
 
 BUNDLE_ROOT = Path(__file__).resolve().parents[5]
 DEFAULT_INTERVAL_SECONDS = 3600
-_COUNTERS = ("events", "terminal_enqueued", "files", "sessions", "skipped_records", "unrecognized_calls")
+_COUNTERS = ("events", "terminal_enqueued", "files", "sessions", "skipped_records", "unrecognized_calls", "replayed_sources")
 
 
 def bundle_version() -> str:
@@ -31,6 +31,15 @@ def bundle_version() -> str:
         return str(json.loads((BUNDLE_ROOT / "manifest.json").read_text(encoding="utf-8")).get("bundle_version") or "unknown")
     except (OSError, ValueError):
         return "unknown"
+
+
+def updater_status() -> dict[str, Any]:
+    """Last result of the self-updater (scripts/observer_update.py), if installed."""
+    try:
+        value = json.loads((BUNDLE_ROOT.parent / "updater" / "status.json").read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
 
 
 def _attribute(key: str, value: object) -> dict[str, object] | None:
@@ -68,6 +77,13 @@ def health_payload(runtime: str, status: dict[str, Any], *, now: datetime, total
         ("observer.health.outbox_pending", int(outbox.get("pending", 0))),
         ("observer.health.outbox_delivered", int(outbox.get("delivered", 0))),
         ("observer.health.outbox_failed", int(outbox.get("failed", 0))),
+    ]
+    update = updater_status()
+    values += [
+        ("observer.health.update_status", update.get("status")),
+        ("observer.health.update_available_version", update.get("available_version")),
+        ("observer.health.update_checked_at", update.get("checked_at")),
+        ("observer.health.update_error", update.get("last_error")),
     ]
     values += [(f"observer.health.total_{name}", int(totals.get(name, 0))) for name in _COUNTERS]
     attributes = [item for key, value in values if (item := _attribute(key, value)) is not None]
