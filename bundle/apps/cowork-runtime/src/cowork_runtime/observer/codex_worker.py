@@ -154,6 +154,13 @@ class CodexObserverWorker:
             raise error
         for directory, _, names in os.walk(self.source_root, onerror=failed):
             files.extend(Path(directory) / name for name in names if name.endswith(".jsonl"))
+        # Codex moves a rollout to ~/.codex/archived_sessions when a thread is
+        # archived. Read that folder too, so a call written just before the
+        # move is not lost; stable event IDs make the re-read idempotent.
+        archived = self.source_root.parent / "archived_sessions"
+        if self.source_root.name == "sessions" and archived.is_dir():
+            for directory, _, names in os.walk(archived):
+                files.extend(Path(directory) / name for name in names if name.endswith(".jsonl"))
         return sorted(files)
 
     def _initialize_high_water(self, files: list[Path]) -> int:
@@ -162,6 +169,7 @@ class CodexObserverWorker:
             installation = json.loads(marker.read_text(encoding="utf-8"))
             if installation["source_root"] != str(self.source_root):
                 raise ValueError("state directory belongs to a different source root")
+            self._installed_at = datetime.fromisoformat(installation["created_at"])
             if installation["complete"]:
                 return 0
         else:
@@ -184,6 +192,7 @@ class CodexObserverWorker:
                 initialized += 1
         installation["complete"] = True
         _atomic_json(marker, installation)
+        self._installed_at = datetime.fromisoformat(installation["created_at"])
         return initialized
 
     def _process(self, source: Path) -> tuple[int, int]:
@@ -193,7 +202,14 @@ class CodexObserverWorker:
         result = self.adapter.read(source, installation_id=INSTALLATION_ID,
                                    session_id=_session_id(source), persist_cursor=False)
         terminal = 0
-        events = [event for event in result.events if event.component_kind in {"skill", "mcp_tool"}]
+        # An archived rollout seen for the first time is read from its start;
+        # never report calls from before the installation (old archived threads).
+        archived = "archived_sessions" in source.parts
+        installed_at = getattr(self, "_installed_at", None) if cursor is None and archived else None
+        events = [
+            event for event in result.events
+            if event.component_kind in {"skill", "mcp_tool"} and (installed_at is None or event.occurred_at >= installed_at)
+        ]
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})
             self.delivery.deliver(safe)

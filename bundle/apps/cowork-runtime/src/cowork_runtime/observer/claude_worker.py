@@ -174,6 +174,7 @@ class ClaudeDesktopObserverWorker:
             installation = json.loads(marker.read_text(encoding="utf-8"))
             if installation["source_root"] != str(self.source_root):
                 raise ValueError("state directory belongs to a different Claude source root")
+            self._installed_at = datetime.fromisoformat(installation["created_at"])
             if installation["complete"]:
                 return 0
         else:
@@ -204,6 +205,7 @@ class ClaudeDesktopObserverWorker:
                 initialized += 1
         installation["complete"] = True
         _atomic_json(marker, installation)
+        self._installed_at = datetime.fromisoformat(installation["created_at"])
         return initialized
 
     @staticmethod
@@ -221,7 +223,20 @@ class ClaudeDesktopObserverWorker:
             skill_ids=self.skill_ids,
             persist_cursor=False,
         )
-        events = [event for event in result.events if event.component_kind in {"skill", "mcp_tool"}]
+        table = source.suffix in (".ldb", ".sst")
+        installed_at = getattr(self, "_installed_at", None) if cursor is None and table else None
+        events = []
+        for event in result.events:
+            if event.component_kind not in {"skill", "mcp_tool"}:
+                continue
+            # LevelDB compaction rewrites records from the log into a new table
+            # file. A new file is read from its start, so drop calls from before
+            # the installation and calls already reported from another file.
+            if installed_at is not None and event.occurred_at < installed_at:
+                continue
+            if event.stage != "started" and self.outbox.has_invocation(event.invocation_id, event.stage):
+                continue
+            events.append(event)
         terminal = 0
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})

@@ -1,0 +1,52 @@
+{
+  "version": "cowork.crawler.golden-replay.v1",
+  "provenance": {
+    "source": "synthetic-static-crawler-fixtures",
+    "contains_user_data": false,
+    "real_model_runs": false,
+    "third_party_network": false
+  },
+  "statuses": ["created", "running", "waiting_input", "partial", "failed", "completed", "cancelled"],
+  "interaction_kinds": ["login", "captcha", "mfa", "permission", "manual_confirmation", "unknown"],
+  "diagnostic_codes": [
+    "crawl.browser_blocked_cross_origin",
+    "crawl.browser_blocked_non_read_request",
+    "crawl.browser_cross_origin_navigation",
+    "crawl.browser_rendered",
+    "crawl.browser_size_limit",
+    "crawl.browser_worker_empty",
+    "crawl.browser_worker_failed",
+    "crawl.browser_worker_notice",
+    "crawl.browser_worker_protocol_error",
+    "crawl.browser_worker_timeout",
+    "crawl.browser_worker_unavailable",
+    "crawl.extraction_empty",
+    "crawl.extraction_failed",
+    "crawl.extraction_partial",
+    "crawl.http_error",
+    "crawl.invalid_request",
+    "crawl.job_conflict",
+    "crawl.limit_reached",
+    "crawl.login_required",
+    "crawl.network_response_redacted",
+    "crawl.rate_limited",
+    "crawl.redirect_limit_exceeded",
+    "crawl.redirect_missing_location",
+    "crawl.redirect_without_target",
+    "crawl.robots_denied",
+    "crawl.robots_unavailable",
+    "crawl.session_expired",
+    "crawl.session_scope_denied",
+    "crawl.size_limit",
+    "crawl.table_not_found",
+    "crawl.unsupported_content_type"
+  ],
+  "scenarios": [
+    {"id": "static_completed", "operation": "fetch_page", "expected_status": "completed", "expected_diagnostics": [], "expected_interaction": null},
+    {"id": "bounded_partial", "operation": "crawl_site", "expected_status": "partial", "expected_diagnostics": [], "expected_interaction": null},
+    {"id": "robots_denied", "operation": "fetch_page", "expected_status": "failed", "expected_diagnostics": ["crawl.robots_denied"], "expected_interaction": null},
+    {"id": "login_waiting_input", "operation": "fetch_page", "expected_status": "waiting_input", "expected_diagnostics": ["crawl.login_required"], "expected_interaction": "permission"},
+    {"id": "rate_limited", "operation": "fetch_page", "expected_status": "failed", "expected_diagnostics": ["crawl.rate_limited"], "expected_interaction": null},
+    {"id": "http_failed", "operation": "fetch_page", "expected_status": "failed", "expected_diagnostics": ["crawl.http_error"], "expected_interaction": null}
+  ]
+}

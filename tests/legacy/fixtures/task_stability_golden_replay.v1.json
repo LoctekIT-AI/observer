@@ -1,0 +1,199 @@
+{
+  "schema_version": "cowork.runtime.semantic-replay.v1",
+  "provenance": {
+    "source": "synthetic-runtime-facts",
+    "contains_user_data": false,
+    "real_model_runs": false,
+    "third_party_network": false
+  },
+  "protection_issues": {
+    "ISSUE-118": "ordinary-follow-up",
+    "ISSUE-126": "file-continue-analysis",
+    "ISSUE-127": "file-continue-analysis",
+    "ISSUE-128": "file-continue-analysis",
+    "ISSUE-130": "file-continue-analysis",
+    "ISSUE-133": "invalid-json",
+    "ISSUE-136": "clarification-answer",
+    "ISSUE-139": "dataset-follow-up"
+  },
+  "main_paths": [
+    {
+      "id": "ordinary-follow-up",
+      "execution_mode": "direct",
+      "status": "completed",
+      "events": [
+        {"type": "run.created"},
+        {"type": "turn.created"},
+        {"type": "trace.context"},
+        {"type": "run.started"},
+        {"type": "pipeline.stage", "payload": {"stage": "model", "status": "started"}},
+        {"type": "pipeline.stage", "payload": {"stage": "model", "status": "completed"}},
+        {"type": "turn.assistant_text"},
+        {"type": "run.completed", "payload": {"status": "completed"}}
+      ],
+      "expected": {"terminal": "run.completed", "asset_ids": []}
+    },
+    {
+      "id": "clarification-answer",
+      "execution_mode": "direct",
+      "status": "completed",
+      "events": [
+        {"type": "run.created"},
+        {"type": "turn.created"},
+        {"type": "crawler.interaction.requested"},
+        {"type": "crawler.interaction.resumed"},
+        {"type": "trace.context"},
+        {"type": "run.started"},
+        {"type": "turn.assistant_text"},
+        {"type": "run.completed", "payload": {"status": "completed"}}
+      ],
+      "expected": {"terminal": "run.completed", "asset_ids": []}
+    },
+    {
+      "id": "file-continue-analysis",
+      "execution_mode": "direct",
+      "status": "completed",
+      "metadata": {"artifact_refs": [{"artifact_id": "artifact-report-v1"}]},
+      "events": [
+        {"type": "run.created"},
+        {"type": "artifact.created", "payload": {"artifact_id": "artifact-report-v1"}},
+        {"type": "turn.created"},
+        {"type": "trace.context"},
+        {"type": "run.started"},
+        {"type": "turn.assistant_text"},
+        {"type": "run.completed", "payload": {"status": "completed"}}
+      ],
+      "expected": {"terminal": "run.completed", "asset_ids": ["artifact-report-v1"]}
+    },
+    {
+      "id": "dataset-follow-up",
+      "execution_mode": "direct",
+      "status": "completed",
+      "metadata": {"session_asset_decision": {"action": "reuse_dataset", "dataset_id": "dataset-reviews"}, "dataset_version_id": "dataset-reviews-v2"},
+      "events": [
+        {"type": "run.created"},
+        {"type": "turn.created"},
+        {"type": "trace.context", "payload": {"dataset_id": "dataset-reviews", "dataset_version_id": "dataset-reviews-v2"}},
+        {"type": "run.started"},
+        {"type": "turn.assistant_text"},
+        {"type": "run.completed", "payload": {"status": "completed"}}
+      ],
+      "expected": {"terminal": "run.completed", "dataset_ids": ["dataset-reviews"]}
+    },
+    {
+      "id": "direct-task",
+      "execution_mode": "direct",
+      "status": "completed",
+      "events": [
+        {"type": "run.created"},
+        {"type": "turn.created"},
+        {"type": "run.started"},
+        {"type": "run.completed", "payload": {"status": "completed"}}
+      ],
+      "expected": {"terminal": "run.completed", "asset_ids": []}
+    },
+    {
+      "id": "orchestrated-task",
+      "execution_mode": "orchestrated",
+      "status": "completed",
+      "events": [
+        {"type": "run.created"},
+        {"type": "turn.created"},
+        {"type": "pipeline.stage", "payload": {"stage": "planning", "status": "completed"}},
+        {"type": "step.created"},
+        {"type": "step.completed"},
+        {"type": "run.completed", "payload": {"status": "completed"}}
+      ],
+      "expected": {"terminal": "run.completed", "asset_ids": []}
+    },
+    {
+      "id": "restart-recovery",
+      "execution_mode": "direct",
+      "status": "blocked",
+      "events": [
+        {"type": "run.created"},
+        {"type": "turn.created"},
+        {"type": "run.started"},
+        {"type": "error.raised", "payload": {"error": {"code": "runtime_restarted", "details": {"stage": "recovery", "reason_code": "runtime.restarted"}}}},
+        {"type": "run.blocked", "payload": {"status": "blocked"}}
+      ],
+      "expected": {"terminal": "run.blocked", "failure_stage": "recovery"}
+    }
+  ],
+  "fault_cases": [
+    {
+      "id": "invalid-json",
+      "execution_mode": "orchestrated",
+      "status": "failed",
+      "events": [
+        {"type": "run.created"},
+        {"type": "pipeline.stage", "payload": {"stage": "planning", "status": "failed"}},
+        {"type": "error.raised", "payload": {"error": {"code": "invalid_request", "details": {"stage": "planning", "reason_code": "planning.invalid_json"}}}},
+        {"type": "run.failed", "payload": {"status": "failed"}}
+      ],
+      "expected": {"failure_stage": "planning"}
+    },
+    {
+      "id": "empty-response",
+      "execution_mode": "direct",
+      "status": "blocked",
+      "events": [
+        {"type": "run.created"},
+        {"type": "pipeline.stage", "payload": {"stage": "model", "status": "completed"}},
+        {"type": "error.raised", "payload": {"error": {"code": "budget_exceeded", "details": {"stage": "model_output", "reason_code": "model.empty_response"}}}},
+        {"type": "run.blocked", "payload": {"status": "blocked"}}
+      ],
+      "expected": {"failure_stage": "model_output"}
+    },
+    {
+      "id": "truncated-response",
+      "execution_mode": "direct",
+      "status": "blocked",
+      "events": [
+        {"type": "run.created"},
+        {"type": "pipeline.stage", "payload": {"stage": "model", "status": "continuation_requested"}},
+        {"type": "error.raised", "payload": {"error": {"code": "budget_exceeded", "details": {"stage": "model_output", "reason_code": "delivery.model_output_incomplete"}}}},
+        {"type": "run.blocked", "payload": {"status": "blocked"}}
+      ],
+      "expected": {"failure_stage": "model_output"}
+    },
+    {
+      "id": "provider-503",
+      "execution_mode": "direct",
+      "status": "failed",
+      "events": [
+        {"type": "run.created"},
+        {"type": "pipeline.stage", "payload": {"stage": "model", "status": "started"}},
+        {"type": "pipeline.stage", "payload": {"stage": "model", "status": "failed"}},
+        {"type": "error.raised", "payload": {"error": {"code": "model_unavailable", "details": {"stage": "model", "reason_code": "model.provider_503"}}}},
+        {"type": "run.failed", "payload": {"status": "failed"}}
+      ],
+      "expected": {"failure_stage": "model"}
+    },
+    {
+      "id": "grant-expired",
+      "execution_mode": "direct",
+      "status": "blocked",
+      "events": [
+        {"type": "run.created"},
+        {"type": "approval.requested", "payload": {"status": "requested"}},
+        {"type": "approval.resolved", "payload": {"status": "expired"}},
+        {"type": "error.raised", "payload": {"error": {"code": "approval_expired", "details": {"stage": "approval", "reason_code": "grant.expired"}}}},
+        {"type": "run.blocked", "payload": {"status": "blocked"}}
+      ],
+      "expected": {"failure_stage": "approval"}
+    },
+    {
+      "id": "duplicate-event-retry",
+      "execution_mode": "direct",
+      "status": "completed",
+      "duplicate_event_index": 2,
+      "events": [
+        {"type": "run.created"},
+        {"type": "pipeline.stage", "payload": {"stage": "model", "status": "started"}},
+        {"type": "run.completed", "payload": {"status": "completed"}}
+      ],
+      "expected": {"terminal": "run.completed", "pipeline_stage_count": 1}
+    }
+  ]
+}

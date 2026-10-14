@@ -1,0 +1,93 @@
+{
+  "version": "cowork.runtime.recovery-gate.v1",
+  "provenance": {
+    "source": "synthetic-recovery-contract-fixtures",
+    "contains_user_data": false,
+    "real_model_runs": false,
+    "third_party_network": false
+  },
+  "forbidden_fragments": [
+    "://",
+    "authorization",
+    "cookie=",
+    "password=",
+    "secret=",
+    "stderr",
+    "stdout",
+    "traceback"
+  ],
+  "provider_cases": [
+    {
+      "id": "catalog_alternative",
+      "tool_name": "fixture.provider",
+      "reason_code": "provider.health.unavailable",
+      "available_tools": ["fixture.provider", "fixture.alternative"],
+      "expected_action": "switch_tool",
+      "expected_suggested_tools": ["fixture.alternative"],
+      "expected_terminal": false
+    },
+    {
+      "id": "no_catalog_alternative",
+      "tool_name": "fixture.provider",
+      "reason_code": "provider.health.unavailable",
+      "available_tools": ["fixture.provider"],
+      "expected_action": "stop",
+      "expected_suggested_tools": [],
+      "expected_terminal": true
+    }
+  ],
+  "crawler_cases": [
+    {
+      "id": "login_wait",
+      "status": "waiting_input",
+      "interaction_kind": "login",
+      "diagnostic_codes": [],
+      "expected_reason_code": "crawler.interaction.login_required",
+      "expected_action": "wait_for_user",
+      "blocks_resource": false
+    },
+    {
+      "id": "captcha_wait",
+      "status": "waiting_input",
+      "interaction_kind": "captcha",
+      "diagnostic_codes": [],
+      "expected_reason_code": "crawler.interaction.captcha_required",
+      "expected_action": "wait_for_user",
+      "blocks_resource": false
+    },
+    {
+      "id": "robots_denied",
+      "status": "failed",
+      "diagnostic_codes": ["crawl.robots_denied"],
+      "expected_reason_code": "crawler.policy.robots_denied",
+      "expected_action": "switch_tool",
+      "blocks_resource": true,
+      "expected_terminal": true
+    },
+    {
+      "id": "rate_limited",
+      "status": "failed",
+      "diagnostic_codes": ["crawl.rate_limited"],
+      "expected_reason_code": "crawler.provider.rate_limited",
+      "expected_action": "switch_tool",
+      "blocks_resource": true
+    },
+    {
+      "id": "quality_exhausted",
+      "status": "partial",
+      "diagnostic_codes": ["crawl.extraction_empty"],
+      "recovery_stop_reason": "recovery_not_better",
+      "expected_reason_code": "crawler.quality.insufficient",
+      "expected_action": "switch_tool",
+      "blocks_resource": true
+    }
+  ],
+  "provider_contracts": {
+    "online_search_all_failed_reason_code": "provider.search.unavailable",
+    "platform_missing_session_reason_code": "provider.platform.session_unavailable",
+    "platform_missing_route_reason_code": "provider.platform.unavailable",
+    "mcp_default_idempotency": "none",
+    "mcp_declared_alternative": "fixture.alternative",
+    "mcp_stable_error_code": "provider.fixture.transient"
+  }
+}

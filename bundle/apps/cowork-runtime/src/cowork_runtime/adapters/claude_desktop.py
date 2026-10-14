@@ -201,9 +201,149 @@ def _leveldb_log_stream(raw: bytes) -> _Stream | None:
     return _Stream(bytes(data), tuple(segments), complete_end, framed=True)
 
 
+_TABLE_MAGIC = 0xDB4775248B80FB57
+_TABLE_FOOTER_SIZE = 48
+_BLOCK_TRAILER_SIZE = 5
+
+
+class _TableFormatError(ValueError):
+    pass
+
+
+def _varint(data: bytes, position: int, end: int | None = None) -> tuple[int, int]:
+    limit = len(data) if end is None else end
+    value = shift = 0
+    while position < limit and shift <= 63:
+        byte = data[position]
+        position += 1
+        value |= (byte & 0x7F) << shift
+        if not byte & 0x80:
+            return value, position
+        shift += 7
+    raise _TableFormatError("truncated varint")
+
+
+def _snappy_decompress(data: bytes) -> bytes:
+    """Decode one raw Snappy block (the format LevelDB uses for table blocks)."""
+    expected, position = _varint(data, 0)
+    output = bytearray()
+    while position < len(data):
+        tag = data[position]
+        position += 1
+        kind = tag & 0x03
+        if kind == 0:  # literal
+            length = tag >> 2
+            if length >= 60:
+                extra = length - 59
+                if position + extra > len(data):
+                    raise _TableFormatError("truncated snappy literal length")
+                length = int.from_bytes(data[position:position + extra], "little")
+                position += extra
+            length += 1
+            if position + length > len(data):
+                raise _TableFormatError("truncated snappy literal")
+            output += data[position:position + length]
+            position += length
+            continue
+        if kind == 1:
+            if position >= len(data):
+                raise _TableFormatError("truncated snappy copy")
+            length = ((tag >> 2) & 0x07) + 4
+            offset = ((tag >> 5) << 8) | data[position]
+            position += 1
+        else:
+            size = 2 if kind == 2 else 4
+            if position + size > len(data):
+                raise _TableFormatError("truncated snappy copy")
+            length = (tag >> 2) + 1
+            offset = int.from_bytes(data[position:position + size], "little")
+            position += size
+        if offset == 0 or offset > len(output):
+            raise _TableFormatError("invalid snappy copy offset")
+        start = len(output) - offset
+        for index in range(length):  # copies may overlap their own output
+            output.append(output[start + index])
+    if len(output) != expected:
+        raise _TableFormatError("snappy length mismatch")
+    return bytes(output)
+
+
+def _table_block(raw: bytes, offset: int, size: int) -> bytes:
+    end = offset + size
+    if offset < 0 or end + _BLOCK_TRAILER_SIZE > len(raw):
+        raise _TableFormatError("block handle outside table")
+    contents = raw[offset:end]
+    compression = raw[end]
+    if compression == 0:
+        return contents
+    if compression == 1:
+        return _snappy_decompress(contents)
+    raise _TableFormatError(f"unsupported block compression {compression}")
+
+
+def _block_entries(block: bytes) -> list[tuple[bytes, bytes]]:
+    if len(block) < 4:
+        raise _TableFormatError("block too small")
+    restarts = int.from_bytes(block[-4:], "little")
+    limit = len(block) - 4 - 4 * restarts
+    if limit < 0:
+        raise _TableFormatError("invalid restart array")
+    entries: list[tuple[bytes, bytes]] = []
+    key = b""
+    position = 0
+    while position < limit:
+        shared, position = _varint(block, position, limit)
+        unshared, position = _varint(block, position, limit)
+        value_length, position = _varint(block, position, limit)
+        if shared > len(key) or position + unshared + value_length > limit:
+            raise _TableFormatError("corrupt block entry")
+        key = key[:shared] + block[position:position + unshared]
+        position += unshared
+        entries.append((key, block[position:position + value_length]))
+        position += value_length
+    return entries
+
+
+def _leveldb_table_values(raw: bytes) -> list[bytes]:
+    """Values of every data block of a LevelDB table (``.ldb`` / ``.sst``).
+
+    LevelDB compacts its write-ahead log into sorted tables whose blocks are
+    usually Snappy-compressed, so tool records that were compacted before the
+    worker read them are only readable after decoding the blocks.
+    """
+    if len(raw) < _TABLE_FOOTER_SIZE:
+        raise _TableFormatError("file too small for a table")
+    footer = raw[-_TABLE_FOOTER_SIZE:]
+    if int.from_bytes(footer[-8:], "little") != _TABLE_MAGIC:
+        raise _TableFormatError("not a LevelDB table")
+    _, position = _varint(footer, 0)  # metaindex offset
+    _, position = _varint(footer, position)  # metaindex size
+    index_offset, position = _varint(footer, position)
+    index_size, _ = _varint(footer, position)
+    values: list[bytes] = []
+    for _, handle in _block_entries(_table_block(raw, index_offset, index_size)):
+        block_offset, cursor = _varint(handle, 0)
+        block_size, _ = _varint(handle, cursor)
+        values.extend(value for _, value in _block_entries(_table_block(raw, block_offset, block_size)))
+    return values
+
+
+def _leveldb_table_stream(raw: bytes) -> _Stream | None:
+    try:
+        values = _leveldb_table_values(raw)
+    except _TableFormatError:
+        return None
+    # Tables are immutable: once decoded, the whole file is complete.
+    return _Stream(b"".join(values), (), len(raw), framed=False)
+
+
 def _source_stream(source: Path, raw: bytes) -> _Stream:
     if source.suffix == ".log":
         stream = _leveldb_log_stream(raw)
+        if stream is not None:
+            return stream
+    if source.suffix in (".ldb", ".sst"):
+        stream = _leveldb_table_stream(raw)
         if stream is not None:
             return stream
     return _raw_stream(raw)

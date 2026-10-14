@@ -135,6 +135,20 @@ class LangfuseContentOutbox:
                 raise RuntimeError("Langfuse outbox lease ownership changed")
             self._connection.commit()
 
+    def has_invocation(self, invocation_id: str, stage: str) -> bool:
+        """True when a terminal event for this native call is already queued or delivered.
+
+        Used where the same native call can be read from more than one source
+        file (Claude's LevelDB moves records from its log into tables).
+        """
+        with self._lock:
+            row = self._connection.execute(
+                "SELECT 1 FROM langfuse_content_outbox WHERE json_extract(payload_json,'$.invocation_id') = ? "
+                "AND json_extract(payload_json,'$.stage') = ? LIMIT 1",
+                (invocation_id, stage),
+            ).fetchone()
+        return row is not None
+
     def count_by_status(self) -> dict[str, int]:
         with self._lock:
             rows = self._connection.execute(
