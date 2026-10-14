@@ -21,4 +21,4 @@ AI 会自动完成以下步骤：
 
 ## 当前版本
 
-- `v0.2.22-test`（测试版，pre-release）：只连接测试环境 `192.168.17.121`，用于验收。已在 macOS 和 Windows 10 实机验证（Windows 上 Codex、WorkBuddy、DSH（DeepSeek Harness）已通过，Claude 待测）。
+- `v0.2.23-test`（测试版，pre-release）：只连接测试环境 `192.168.17.121`，用于验收。已在 macOS 和 Windows 10 实机验证（Windows 上 Codex、WorkBuddy、DSH（DeepSeek Harness）已通过，Claude 待测）。
