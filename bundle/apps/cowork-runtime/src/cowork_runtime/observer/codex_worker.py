@@ -24,6 +24,7 @@ from ..adapters.registry import CodexCursor, PluginRegistry
 from ..persistence.sqlite_store import SQLiteRuntimeStore
 from ..telemetry.emitter import EventStoreTraceEmitter
 from ..telemetry.langfuse import LangfuseConfig, LangfuseExporter
+from ..telemetry.health import HealthReporter
 from ..telemetry.langfuse_outbox import LangfuseContentOutbox
 from ..telemetry.identity import ObserverIdentity
 
@@ -109,6 +110,8 @@ class CodexObserverWorker:
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.interval_seconds = interval_seconds
         self.flush_enabled = flush
+        self.health = HealthReporter(self.state_dir, "codex", enabled=flush)
+        self._unrecognized = 0
         self.store = SQLiteRuntimeStore(self.state_dir / "observer.sqlite3")
         self.registry = PluginRegistry(self.store)
         if self.store.get_adapter_plugin(PLUGIN_ID, INSTALLATION_ID) is None:
@@ -211,6 +214,7 @@ class CodexObserverWorker:
             event for event in result.events
             if (event.component_kind in {"skill", "mcp_tool"} or is_degraded(event)) and (installed_at is None or event.occurred_at >= installed_at)
         ]
+        self._unrecognized += sum(1 for event in events if is_degraded(event) and event.stage != "started")
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})
             self.delivery.deliver(safe)
@@ -259,13 +263,16 @@ class CodexObserverWorker:
         except (OSError, RuntimeError, ValueError) as exc:
             errors.append(self._error("delivery_failed", self.state_dir / "langfuse-content-outbox.sqlite3", exc))
         run = CodexObserverRun(len(files), events, terminal, initialized, tuple(errors))
-        _atomic_json(self.state_dir / "status.json", {
+        status = {
             "status": "failed" if errors else "ok", "pid": os.getpid(),
             "launch_pid": os.getppid() if getattr(sys, "frozen", False) else os.getpid(),
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "files": run.files, "events": run.events, "terminal_enqueued": terminal,
             "errors": errors, "outbox": self.outbox.count_by_status(),
-        })
+        }
+        _atomic_json(self.state_dir / "status.json", status)
+        self.health.observe(status, unrecognized_calls=self._unrecognized)
+        self._unrecognized = 0
         return run
 
     def run_once(self) -> CodexObserverRun:

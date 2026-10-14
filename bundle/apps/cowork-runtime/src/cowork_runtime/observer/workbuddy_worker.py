@@ -24,6 +24,7 @@ from ..adapters.workbuddy_desktop import WorkBuddyDesktopAdapter
 from ..persistence.sqlite_store import SQLiteRuntimeStore
 from ..telemetry.emitter import EventStoreTraceEmitter
 from ..telemetry.langfuse import LangfuseConfig, LangfuseExporter
+from ..telemetry.health import HealthReporter
 from ..telemetry.langfuse_outbox import LangfuseContentOutbox
 from ..telemetry.identity import ObserverIdentity
 
@@ -84,6 +85,8 @@ class WorkBuddyDesktopObserverWorker:
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.interval_seconds = interval_seconds
         self.flush_enabled = flush
+        self.health = HealthReporter(self.state_dir, "workbuddy", enabled=flush)
+        self._unrecognized = 0
         self.store = SQLiteRuntimeStore(self.state_dir / "observer.sqlite3")
         self.registry = PluginRegistry(self.store)
         self.adapter = WorkBuddyDesktopAdapter(self.registry)
@@ -193,6 +196,7 @@ class WorkBuddyDesktopObserverWorker:
         # Malformed source lines the adapter had to skip stay visible in status.json.
         self._skipped_records = getattr(self, "_skipped_records", 0) + len(result.diagnostics)
         events = [event for event in result.events if event.component_kind in {"skill", "mcp_tool"} or is_degraded(event)]
+        self._unrecognized += sum(1 for event in events if is_degraded(event) and event.stage != "started")
         terminal = 0
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})
@@ -245,7 +249,7 @@ class WorkBuddyDesktopObserverWorker:
         except (OSError, RuntimeError, ValueError) as exc:
             errors.append(self._error("delivery_failed", self.state_dir / "langfuse-content-outbox.sqlite3", exc))
         report = WorkBuddyObserverRun(1 if source is not None else 0, len(sessions), events, terminal, initialized, tuple(errors))
-        _atomic_json(self.state_dir / "status.json", {
+        status = {
             "status": "failed" if errors else "ok",
             "pid": os.getpid(),
             "launch_pid": os.getpid(),
@@ -260,7 +264,10 @@ class WorkBuddyDesktopObserverWorker:
             "errors": list(report.errors),
             "skipped_records": getattr(self, "_skipped_records", 0),
             "outbox": self.outbox.count_by_status(),
-        })
+        }
+        _atomic_json(self.state_dir / "status.json", status)
+        self.health.observe(status, unrecognized_calls=self._unrecognized)
+        self._unrecognized = 0
         return report
 
     def run_once(self) -> WorkBuddyObserverRun:

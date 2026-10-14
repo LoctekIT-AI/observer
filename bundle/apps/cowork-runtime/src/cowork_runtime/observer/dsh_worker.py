@@ -22,6 +22,7 @@ from ..persistence.sqlite_store import SQLiteRuntimeStore
 from ..telemetry.emitter import EventStoreTraceEmitter
 from ..telemetry.identity import ObserverIdentity
 from ..telemetry.langfuse import LangfuseConfig, LangfuseExporter
+from ..telemetry.health import HealthReporter
 from ..telemetry.langfuse_outbox import LangfuseContentOutbox
 
 
@@ -54,6 +55,8 @@ class DshObserverWorker:
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.interval_seconds = interval_seconds
         self.flush_enabled = flush
+        self.health = HealthReporter(self.state_dir, "dsh", enabled=flush)
+        self._unrecognized = 0
         self.store = SQLiteRuntimeStore(self.state_dir / "observer.sqlite3")
         self.registry = PluginRegistry(self.store)
         self.outbox = LangfuseContentOutbox(self.state_dir / "langfuse-content-outbox.sqlite3")
@@ -105,6 +108,7 @@ class DshObserverWorker:
                 if event is None:  # skipped line: just move past it
                     self.registry.save_cursor(CodexCursor(self.reader_id, str(path), identity, next_offset, datetime.now(timezone.utc)))
                     continue
+                self._unrecognized += int(event.component_kind == "unknown")
                 self._register(event.installation_id)
                 binding = self.registry.binding(event.installation_id)
                 if binding is not None:
@@ -134,10 +138,13 @@ class DshObserverWorker:
         return result
 
     def _status(self, status: str, **fields: object) -> None:
-        _atomic_status(self.state_dir / "status.json", {
+        payload = {
             "status": status, "runtime": "dsh", "pid": os.getpid(), "launch_pid": os.getpid(),
             "checked_at": datetime.now(timezone.utc).isoformat(), "outbox": self.outbox.count_by_status(), **fields,
-        })
+        }
+        _atomic_status(self.state_dir / "status.json", payload)
+        self.health.observe(payload, unrecognized_calls=self._unrecognized)
+        self._unrecognized = 0
 
     def run_once(self) -> DshObserverRun:
         with self._single_instance():

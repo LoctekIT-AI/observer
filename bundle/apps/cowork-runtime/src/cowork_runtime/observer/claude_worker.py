@@ -23,6 +23,7 @@ from ..adapters.registry import CodexCursor, PluginRegistry
 from ..persistence.sqlite_store import SQLiteRuntimeStore
 from ..telemetry.emitter import EventStoreTraceEmitter
 from ..telemetry.langfuse import LangfuseConfig, LangfuseExporter
+from ..telemetry.health import HealthReporter
 from ..telemetry.langfuse_outbox import LangfuseContentOutbox
 from ..telemetry.identity import ObserverIdentity
 
@@ -110,6 +111,8 @@ class ClaudeDesktopObserverWorker:
         self.state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.interval_seconds = interval_seconds
         self.flush_enabled = flush
+        self.health = HealthReporter(self.state_dir, "claude", enabled=flush)
+        self._unrecognized = 0
         configured_skills = {value.strip() for value in skill_ids if isinstance(value, str) and value.strip()}
         if skills_root is not None:
             configured_skills.update(_skill_ids_from_manifests(Path(skills_root).expanduser().resolve()))
@@ -238,6 +241,7 @@ class ClaudeDesktopObserverWorker:
             if event.stage != "started" and self.outbox.has_invocation(event.invocation_id, event.stage):
                 continue
             events.append(event)
+        self._unrecognized += sum(1 for event in events if is_degraded(event) and event.stage != "started")
         terminal = 0
         for event in events:
             safe = event.model_copy(update={"user_input": None, "model_output": None, "tool_result": None})
@@ -287,7 +291,7 @@ class ClaudeDesktopObserverWorker:
         except (OSError, RuntimeError, ValueError) as exc:
             errors.append(self._error("delivery_failed", self.state_dir / "langfuse-content-outbox.sqlite3", exc))
         report = ClaudeObserverRun(len(files), events, terminal, initialized, tuple(errors))
-        _atomic_json(self.state_dir / "status.json", {
+        status = {
             "status": "failed" if errors else "ok",
             "pid": os.getpid(),
             "launch_pid": os.getpid(),
@@ -298,7 +302,10 @@ class ClaudeDesktopObserverWorker:
             "terminal_enqueued": report.terminal_enqueued,
             "errors": list(report.errors),
             "outbox": self.outbox.count_by_status(),
-        })
+        }
+        _atomic_json(self.state_dir / "status.json", status)
+        self.health.observe(status, unrecognized_calls=self._unrecognized)
+        self._unrecognized = 0
         return report
 
     def run_once(self) -> ClaudeObserverRun:
