@@ -51,4 +51,4 @@ AI 会先向你说明上面这些内容，并告诉你检测到了哪些客户�
 
 ## 当前版本
 
-- `v0.2.24-test`（测试版，pre-release）：只连接测试环境 `192.168.17.121`，用于验收。已在 macOS 和 Windows 10 实机验证（Windows 上 Codex、WorkBuddy、DSH（DeepSeek Harness）已通过，Claude 待测）。
+- `v0.2.25-test`（测试版，pre-release）：只连接测试环境 `192.168.17.121`，用于验收。已在 macOS 和 Windows 10 实机验证（Windows 上 Codex、WorkBuddy、DSH（DeepSeek Harness）已通过，Claude 待测）。
