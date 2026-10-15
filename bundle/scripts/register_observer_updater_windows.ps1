@@ -30,7 +30,7 @@ if (-not (Test-Path -LiteralPath $UpdaterScript -PathType Leaf)) { throw 'Observ
 New-Item -ItemType Directory -Force -Path $StateDirectory | Out-Null
 $execute = Get-ObserverWindowlessPath $PythonExecutable
 $arguments = (ConvertTo-ObserverArgument $UpdaterScript) + ' run'
-if ($null -ne $existing -and @($existing.Actions).Count -eq 1 -and @($existing.Actions)[0].Execute -eq $execute -and @($existing.Actions)[0].Arguments -eq $arguments -and @($existing.Actions)[0].WorkingDirectory -eq $StateDirectory) {
+if ($null -ne $existing -and @($existing.Actions).Count -eq 1 -and @($existing.Actions)[0].Execute -eq $execute -and @($existing.Actions)[0].Arguments -eq $arguments -and @($existing.Actions)[0].WorkingDirectory -eq $StateDirectory -and $existing.Settings.Priority -eq 5) {
     # Same definition: leave it alone, so an update that runs this installer is not interrupted.
     @{status='ok'; task=$taskName; changed=$false} | ConvertTo-Json -Compress
     return
@@ -49,7 +49,9 @@ $triggers = @(
     (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(15) -RepetitionInterval (New-TimeSpan -Hours 6))
 )
 $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
-$settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+# Priority 5 (normal): the Task Scheduler default 7 runs the installer at low CPU and I/O priority, which made a
+# background update take more than ten minutes.
+$settings = New-ScheduledTaskSettingsSet -Priority 5 -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
 Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Description 'AIHub Observer signed self-update' -Force | Out-Null
 if ($null -eq (Find-ObserverTask $taskName)) { throw 'Observer updater task registration failed' }
 @{status='ok'; task=$taskName; changed=$true} | ConvertTo-Json -Compress

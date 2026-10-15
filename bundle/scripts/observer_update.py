@@ -55,7 +55,7 @@ RETRY_INTERVAL = timedelta(hours=6)
 MAX_ATTEMPTS = 3
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024
 MAX_CHANNEL_BYTES = 64 * 1024
-INSTALL_TIMEOUT_SECONDS = 1800
+INSTALL_TIMEOUT_SECONDS = 3600  # a background install for four clients can take 10+ minutes
 USER_AGENT = "observer-updater"
 LAUNCH_AGENT_LABEL = "com.aihub.observer-updater"
 UPDATE_INTERVAL_SECONDS = 6 * 3600
