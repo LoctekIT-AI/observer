@@ -341,6 +341,11 @@ def _no_window() -> int:
     return 0x08000000 if os.name == "nt" else 0  # CREATE_NO_WINDOW
 
 
+def _installer_flags() -> int:
+    # NORMAL_PRIORITY_CLASS: scheduled tasks start below normal priority, which slows the install a lot.
+    return _no_window() | (0x00000020 if os.name == "nt" else 0)
+
+
 # --------------------------------------------------------------------------- updater
 
 
@@ -469,7 +474,10 @@ class Updater:
         assert config.public_key is not None
         entry = verify_channel_entry(entry, channel=config.channel, public_key=config.public_key)
         available = entry["version"]
-        if version_tuple(available) <= version_tuple(current):
+        # An install that failed part-way can already have switched the shared bundle to the new
+        # version while some clients still run the old setup: such a version is retried, not "up to date".
+        incomplete = state.get("incomplete_version") == available
+        if version_tuple(available) < version_tuple(current) or (available == current and not incomplete):
             return self._finish(state, "up_to_date", available_version=available, last_error=None)
         if dry_run:
             return {**state, "status": "update_available", "available_version": available, "current_version": current}
@@ -489,7 +497,7 @@ class Updater:
             return self._finish(state, "login_missing", available_version=available)
 
         attempts[available] = tried + 1
-        state.update(attempts=attempts, last_attempt_at=_iso(self.now()), available_version=available)
+        state.update(attempts=attempts, last_attempt_at=_iso(self.now()), available_version=available, incomplete_version=available)
         self._finish(state, "updating")
         archive_bytes = self.fetch(config.download_url.format(tag=entry["tag"], asset=entry["asset"]), max_bytes=MAX_ARCHIVE_BYTES, timeout=600)
         if len(archive_bytes) != entry["size"] or hashlib.sha256(archive_bytes).hexdigest() != entry["sha256"]:
@@ -519,6 +527,7 @@ class Updater:
         if bundle_version(self.bundle) != available:
             raise UpdateError("install_failed", "installed version did not change")
         shutil.rmtree(work, ignore_errors=True)
+        state.pop("incomplete_version", None)
         return self._finish(state, "updated", updated_to=available, updated_at=_iso(self.now()), attempts={}, last_error=None)
 
     # ---- installer
@@ -557,7 +566,7 @@ class Updater:
             try:
                 result = subprocess.run(command, cwd=str(self.state_dir), stdin=subprocess.DEVNULL, stdout=output,
                     stderr=subprocess.STDOUT, env=environment, timeout=INSTALL_TIMEOUT_SECONDS,
-                    creationflags=_no_window(), start_new_session=os.name != "nt")
+                    creationflags=_installer_flags(), start_new_session=os.name != "nt")
             except subprocess.TimeoutExpired:
                 return 124
         return result.returncode

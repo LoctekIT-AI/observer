@@ -160,6 +160,7 @@ function Assert-ObserverProcessArguments($Process, [string[]]$Executables, [stri
 
 function Assert-ObserverHeartbeat([string]$TaskName, [string]$StateDirectory, [datetimeoffset]$Since, $Plan) {
     $deadline = (Get-Date).AddSeconds(40)
+    $staleHeartbeat = $null
     $statusPath = Join-Path $StateDirectory 'status.json'
     do {
         $task = Find-ObserverTask $TaskName
@@ -175,7 +176,9 @@ function Assert-ObserverHeartbeat([string]$TaskName, [string]$StateDirectory, [d
                     $workerId = [uint32]$heartbeat.pid
                     if ($workerId -eq 0) { throw 'Selected heartbeat has an invalid process ID' }
                     $workerProcess = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $workerId"
-                    if ($null -eq $workerProcess) { throw 'Selected heartbeat process has exited' }
+                    # The heartbeat can still come from a worker that was just replaced (the task restarts
+                    # it, or an older instance wrote last). Wait for the next heartbeat until the deadline.
+                    if ($null -eq $workerProcess) { $staleHeartbeat = $workerId; Start-Sleep -Milliseconds 500; continue }
                     # The CPython venv shim spawns the base interpreter; the base path comes from a real probe and pyvenv.cfg.
                     $basePaths = Get-ObserverInterpreterVariants @($Plan.identity.base_executable, $Plan.identity.base_invocation)
                     if (-not ($basePaths -contains $workerProcess.ExecutablePath)) { throw 'Heartbeat process is not the verified managed base interpreter' }
@@ -202,5 +205,6 @@ function Assert-ObserverHeartbeat([string]$TaskName, [string]$StateDirectory, [d
         }
         Start-Sleep -Milliseconds 500
     } while ((Get-Date) -lt $deadline)
+    if ($staleHeartbeat) { throw "Selected heartbeat process has exited (pid $staleHeartbeat) and no newer heartbeat arrived within 40 seconds: $TaskName" }
     throw "Selected worker has no fresh running heartbeat after 40 seconds: $TaskName"
 }

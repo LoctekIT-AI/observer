@@ -78,6 +78,7 @@ if ($DetectOnly) { return }
 if ($selected.Count -eq 0) { throw 'No supported desktop AI client was detected' }
 if ($Mode -eq 'install' -and -not $Archive) { throw '-Archive is required for install' }
 $single = Join-Path $PSScriptRoot 'install_observer_windows.ps1'
+$failedHosts = @()
 foreach ($hostId in $selected) {
     if (-not $detected[$hostId]) {
         if ($Unattended) { Write-Output "=== skip $hostId (not detected on this machine)"; continue }
@@ -100,7 +101,12 @@ foreach ($hostId in $selected) {
         }
     }
     Write-Output "=== $Mode $hostId"
-    & $single @common
+    if ($Unattended) {
+        # Self-update: one client failing (its previous setup is restored) must not stop the others.
+        try { & $single @common } catch { Write-Output "=== FAILED $hostId : $($_.Exception.Message)"; $failedHosts += $hostId }
+    } else {
+        & $single @common
+    }
 }
 if ($Mode -eq 'install') {
     # Signed self-update (scripts\observer_update.py). The collectors keep working without it.
@@ -110,3 +116,4 @@ if ($Mode -eq 'install') {
         Write-Warning "Observer: the self-update task could not be registered: $($_.Exception.Message)"
     }
 }
+if ($failedHosts.Count -gt 0) { throw ("Observer install failed for: " + ($failedHosts -join ', ')) }

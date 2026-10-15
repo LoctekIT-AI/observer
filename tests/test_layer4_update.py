@@ -339,3 +339,19 @@ def test_check_never_overwrites_the_status_of_a_running_update(tmp_path):
     updater, _ = _updater(tmp_path, bundle, Net(update.make_channel_entry(channel="test", version="0.2.26", archive=data, seed=SEED), data), Installer(bundle))
     assert updater.run(dry_run=True)["status"] == "up_to_date"
     assert json.loads(status.read_text())["status"] == "updating"
+
+
+def test_a_partly_failed_install_of_the_same_version_is_retried(tmp_path):
+    bundle = _bundle(tmp_path)
+    data = _zip("0.2.27")
+    entry = update.make_channel_entry(channel="test", version="0.2.27", archive=data, seed=SEED)
+    # first try: the shared bundle switches to 0.2.27, then one client fails
+    updater, clock = _updater(tmp_path, bundle, Net(entry, data), Installer(bundle, code=1, installs=True))
+    assert updater.run()["status"] == "install_failed"
+    clock["now"] += timedelta(hours=7)
+    retry = Installer(bundle)
+    updater.runner = retry
+    result = updater.run()
+    assert result["status"] == "updated" and len(retry.calls) == 1 and "incomplete_version" not in result
+    clock["now"] += timedelta(hours=2)
+    assert updater.run()["status"] == "up_to_date"
