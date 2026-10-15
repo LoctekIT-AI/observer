@@ -6,7 +6,7 @@ Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平�
 
 **会采集并上报：**
 
-- 调用记录本身：哪个客户端、哪个 Skill / MCP 工具（DSH 还包括内置工具名）、调用时间、成功 / 失败 / 超时；
+- 调用记录本身：哪个客户端、哪个 Skill / MCP 工具、调用时间、成功 / 失败 / 超时；
 - 技术标识：会话编号、调用编号、本机安装编号。
 
 **不会采集：** 对话内容、提示词正文、模型输出、工具参数和工具返回内容。这些内容在本机就被去掉，不会离开你的电脑。
@@ -29,6 +29,24 @@ Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平�
 不需要管理员权限，可以随时卸载（见安装包内 README 的 uninstall 说明）。
 
 ## 安装
+
+### 方式一：双击安装（推荐，不需要 AI 助手）
+
+- **Windows**：下载 [Install-Observer-Windows.cmd](https://github.com/LoctekIT-AI/observer/raw/main/install/Install-Observer-Windows.cmd)，双击运行（如果出现“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”）。也可以在 PowerShell 里运行：
+
+  ```powershell
+  irm https://raw.githubusercontent.com/LoctekIT-AI/observer/main/install/install-windows.ps1 | iex
+  ```
+
+- **macOS**：下载 [Install-Observer-macOS.command](https://github.com/LoctekIT-AI/observer/raw/main/install/Install-Observer-macOS.command)，双击运行（第一次如果提示“无法打开”，右键 → 打开）。也可以在“终端”里运行：
+
+  ```bash
+  /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/LoctekIT-AI/observer/main/install/install-macos.sh)"
+  ```
+
+安装程序会先说明上面这些内容，下载最新安装包并校验 SHA-256，列出检测到的客户端，**你确认后**才安装；第一次会打开浏览器用飞书登录。AI Hub 需要先打开过一次。
+
+### 方式二：让 AI 助手安装
 
 在四个客户端中任意一个里对 AI 说：
 

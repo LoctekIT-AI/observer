@@ -41,3 +41,19 @@ def test_macos_prefers_ai_hub_once_it_has_been_opened(tmp_path):
     chosen = dsh.macos_default_dsh(home=home, aihub_app=app)
     assert chosen == {"app": app, "cli": launcher, "profile": profile}
     assert profile.parent.parent.name == "ah-home"  # DSH_HOME passed to the launcher
+
+
+def test_dsh_built_in_tools_are_not_reported(tmp_path):
+    from cowork_runtime.observer.dsh_worker import DshObserverWorker
+    from test_layer3_degraded import _dsh_record
+
+    source = tmp_path / "dsh"
+    source.mkdir()
+    (source / "component-events.jsonl").write_text(
+        _dsh_record(event_id="dsh:e1", invocation_id="dsh:i1", component_kind="tool", component_id="bash", observation_kind="tool_result")
+        + _dsh_record(event_id="dsh:e2", invocation_id="dsh:i2")  # skill office-docx
+        + _dsh_record(event_id="dsh:e3", invocation_id="dsh:i3", component_kind="mcp_tool", component_id="mcp__x__y", observation_kind="tool_result"))
+    worker = DshObserverWorker(source_root=source, state_dir=tmp_path / "state", flush=False)
+    worker.run_once()
+    assert sum(worker.outbox.count_by_status().values()) == 2
+    worker.close()

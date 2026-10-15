@@ -1,0 +1,57 @@
+#!/bin/bash
+# Observer 安装（macOS）。不需要 AI 助手：双击 Install-Observer-macOS.command，或在“终端”里运行
+#   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/LoctekIT-AI/observer/main/install/install-macos.sh)"
+# 步骤：读取签名的版本文件 → 下载安装包并校验 SHA-256 → 检测本机客户端 → 征得同意后安装（飞书登录一次）。
+set -euo pipefail
+REPO=LoctekIT-AI/observer
+CHANNEL=${OBSERVER_CHANNEL:-test}
+fail() { printf '\n安装没有完成：%s\n' "$1" >&2; exit 1; }
+ask() { local answer=''; if [ "${OBSERVER_ASSUME_YES:-}" = 1 ]; then answer=Y; else read -r -p "$1" answer < /dev/tty || true; fi; printf '%s' "$answer"; }
+
+printf '\n==== Observer 安装 ====\n'
+printf '%s\n' 'Observer 是公司内部部署的 AI 使用统计工具：统计你在 Codex、Claude、AI Hub（DSH）、WorkBuddy 里调用了哪些 Skill 和 MCP（调用了哪个、什么时候、成功还是失败），按飞书登录的工号和姓名归属。'
+printf '%s\n' '不会采集对话内容、提示词、模型输出、工具参数和返回内容。'
+printf '%s\n\n' '会在本机安装：后台收集程序（LaunchAgent）、自动更新任务（只安装公司签名的新版本）；WorkBuddy 会加 3 个钩子，AI Hub 会加一个 Observer 插件。'
+
+work=$(/usr/bin/mktemp -d /private/tmp/observer-install.XXXXXX)
+channel_url="https://raw.githubusercontent.com/$REPO/main/channels/$CHANNEL.json"
+printf '读取最新版本：%s\n' "$channel_url"
+/usr/bin/curl -fsSL --proto '=https' "$channel_url" -o "$work/channel.json" || fail '无法读取版本文件'
+field() { /usr/bin/plutil -extract "$1" raw -o - "$work/channel.json"; }
+version=$(field version); tag=$(field tag); asset=$(field asset); sha=$(field sha256); size=$(field size)
+suffix=''; [ "$CHANNEL" = test ] && suffix='-test'
+[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || fail '版本文件格式不对'
+[ "$tag" = "v$version$suffix" ] && [ "$asset" = "observer-v$version$suffix.zip" ] && [[ "$sha" =~ ^[0-9a-f]{64}$ ]] || fail '版本文件格式不对'
+printf '最新版本：%s\n' "$tag"
+
+archives="$HOME/Library/Application Support/AIHub/observer/archives"
+mkdir -p "$archives"
+archive="$archives/$asset"
+url="https://github.com/$REPO/releases/download/$tag/$asset"
+printf '下载安装包：%s\n' "$url"
+/usr/bin/curl -fL --proto '=https' --proto-redir '=https' --silent --show-error "$url" -o "$archive" || fail '下载失败'
+actual=$(/usr/bin/shasum -a 256 "$archive"); actual=${actual%% *}
+[ "$actual" = "$sha" ] && [ "$(/usr/bin/stat -f %z "$archive")" = "$size" ] || { rm -f "$archive"; fail '安装包校验失败（SHA-256 不一致）'; }
+printf '安装包校验通过。\n'
+/usr/bin/ditto -x -k "$archive" "$work/source"
+
+printf '\n检测本机的 AI 客户端：\n'
+detect=$(/bin/bash "$work/source/scripts/observer_detect_clients_macos.sh")
+printf '%s\n' "$detect" | /usr/bin/grep -v '^HOSTS=' | /usr/bin/sed 's/^/  /'
+found=$(printf '%s\n' "$detect" | /usr/bin/sed -n 's/^HOSTS=//p' | tail -1)
+[ -n "$found" ] || fail '没有检测到支持的客户端（Codex、Claude、AI Hub、WorkBuddy）。AI Hub 需要先打开过一次。'
+
+printf '\n将为这些客户端安装：%s\n' "$found"
+answer=$(ask '全部安装请输入 Y；只装其中几个请输入名称（用空格分隔）；直接回车取消：')
+[ -n "$answer" ] || { printf '已取消，没有做任何改动。\n'; exit 0; }
+selected=$found
+if [ "$answer" != Y ] && [ "$answer" != y ]; then
+    selected=$(printf '%s' "$answer" | /usr/bin/sed -e 's/，/ /g' -e 's/,/ /g')
+    for name in $selected; do case " $found " in *" $name "*) ;; *) fail "没有检测到客户端：$name" ;; esac; done
+fi
+args=(); for name in $selected; do args+=(--host "$name"); done
+
+printf '\n开始安装。第一次安装会打开浏览器，请用飞书登录；之后不会再要求登录。\n'
+/bin/bash "$work/source/scripts/bootstrap_observer_macos.sh" --archive "$archive" "${args[@]}" --authorize || fail '安装程序出错，请把上面的输出发给 AI 平台团队'
+printf '\n安装完成。之后采集和上报都在后台自动进行，也会自动更新。\n'
+case " $selected " in *" dsh "*|*" workbuddy-desktop "*) printf '请把 AI Hub 和 WorkBuddy 完全退出（Cmd+Q）再打开一次。\n' ;; esac

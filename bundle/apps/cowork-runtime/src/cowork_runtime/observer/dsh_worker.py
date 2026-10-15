@@ -124,6 +124,12 @@ class DshObserverWorker:
                     line_start = next_offset
                     self.registry.save_cursor(CodexCursor(self.reader_id, str(path), identity, next_offset, datetime.now(timezone.utc)))
                     continue
+                if event.component_kind == "tool":
+                    # DSH built-in tools (bash, write, read_image, ...) are not reported: only Skill
+                    # and MCP calls (and unrecognized calls) are, as for the other clients.
+                    line_start = next_offset
+                    self.registry.save_cursor(CodexCursor(self.reader_id, str(path), identity, next_offset, datetime.now(timezone.utc)))
+                    continue
                 self._unrecognized += int(event.component_kind == "unknown")
                 self._register(event.installation_id)
                 binding = self.registry.binding(event.installation_id)
