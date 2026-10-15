@@ -1,11 +1,11 @@
 {
-  "asset": "observer-v0.2.31-test.zip",
+  "asset": "observer-v0.2.32-test.zip",
   "channel": "test",
-  "published_at": "2026-10-15T01:51:17+00:00",
+  "published_at": "2026-10-15T03:00:53+00:00",
   "schema": "observer.channel.v1",
-  "sha256": "667eafc5a081ba2fa2a2cb831fb18267850a4ee26149de2ec0d62f7887ba093d",
-  "signature": "6bf458d0f39a643b17095164aabdb437ee880af0c20c1522eca72fe14f0db3c88e6faee0dd8bd2676c55255267a03525ca2ce8dcaef4c4f14539b56b2d14c700",
-  "size": 494542,
-  "tag": "v0.2.31-test",
-  "version": "0.2.31"
+  "sha256": "085a97c93e38c2cae139d72a4a7dab4aff410d21a7b37d4df94a5c3761153342",
+  "signature": "a1241432e09a353e690dbeb0f4d0b8f4c54b58cb561af475c77cae32c3998cda51fa564777d7c3d1a4d4ec4ab83996fb70991115d579adb76b0d6589bda43204",
+  "size": 494581,
+  "tag": "v0.2.32-test",
+  "version": "0.2.32"
 }
