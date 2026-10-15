@@ -410,7 +410,8 @@ class Updater:
             state["current_version"] = bundle_version(self.bundle)
         except (OSError, ValueError, KeyError):
             state["current_version"] = None
-        _atomic_json(self.status_path, state)
+        if not getattr(self, "_dry_run", False):  # "check" only reports; it never overwrites a running update's status
+            _atomic_json(self.status_path, state)
         return state
 
     def _lock(self) -> Path | None:
@@ -432,6 +433,7 @@ class Updater:
 
     # ---- main
     def run(self, *, force: bool = False, dry_run: bool = False) -> dict:
+        self._dry_run = dry_run
         state = self._state()
         try:
             config = UpdateConfig.load(self.bundle)

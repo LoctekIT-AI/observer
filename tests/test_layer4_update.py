@@ -328,3 +328,14 @@ def test_health_is_sent_again_after_an_update(tmp_path, monkeypatch):
     assert not reporter.observe({"status": "ok"}, now=T0 + timedelta(minutes=5))
     monkeypatch.setattr(health, "bundle_version", lambda: "0.2.27")
     assert reporter.observe({"status": "ok"}, now=T0 + timedelta(minutes=6))
+
+
+def test_check_never_overwrites_the_status_of_a_running_update(tmp_path):
+    bundle = _bundle(tmp_path)
+    data = _zip("0.2.26")
+    status = bundle.parent / "updater" / "status.json"
+    status.parent.mkdir(parents=True)
+    status.write_text(json.dumps({"status": "updating", "available_version": "0.2.27"}))
+    updater, _ = _updater(tmp_path, bundle, Net(update.make_channel_entry(channel="test", version="0.2.26", archive=data, seed=SEED), data), Installer(bundle))
+    assert updater.run(dry_run=True)["status"] == "up_to_date"
+    assert json.loads(status.read_text())["status"] == "updating"
