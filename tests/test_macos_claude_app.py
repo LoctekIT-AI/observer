@@ -57,3 +57,21 @@ def test_bootstrap_registers_the_updater_even_when_a_client_fails():
     assert install.endswith("|| observer_install_rc=$?")
     assert text.index("|| observer_install_rc=$?") < text.index("observer_update.py") < text.rindex('exit "$observer_install_rc"')
     assert text.rstrip().endswith('exit "$observer_install_rc"')
+
+
+def test_any_subset_of_clients_is_detected(tmp_path):
+    if Path("/Applications/Claude.app").exists() or Path("/Applications/WorkBuddy.app").exists():
+        return
+    home = tmp_path / "home"
+    home.mkdir()
+    assert _detect(home) == {k: v for k, v in _detect(home).items() if v[0] == "missing"}
+    (home / ".workbuddy").mkdir()
+    (home / ".workbuddy/settings.json").write_text("{}")
+    state, reason = _detect(home)["workbuddy-desktop"]
+    assert state == "missing" and "app is not installed" in reason
+    app = home / "Applications/WorkBuddy.app/Contents"
+    app.mkdir(parents=True)
+    (app / "Info.plist").write_bytes(plistlib.dumps({"CFBundleShortVersionString": "5.7.7"}))
+    (home / ".codex/sessions").mkdir(parents=True)
+    rows = _detect(home)
+    assert [h for h, (state, _) in rows.items() if state == "found"] == ["codex", "workbuddy-desktop"]

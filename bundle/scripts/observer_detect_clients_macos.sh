@@ -1,5 +1,6 @@
 #!/bin/bash
 # 只读：检测本机已安装、且有原生数据目录的桌面 AI 客户端。不修改任何文件。
+# 每台电脑装了哪些客户端都不一定：只要求应用和数据都在（Claude、WorkBuddy 要能读到应用版本）。
 # 输出每个客户端一行：<host> <found|missing> <原因>；最后一行 HOSTS=<可安装的 host 列表>。
 set -euo pipefail
 hosts=()
@@ -28,5 +29,11 @@ elif [ -f "$dsh_profile/package.json" ] && [ -f "$dsh_cli" ]; then report dsh fo
 elif [ -f "$aihub_cli" ]; then report dsh missing "AI Hub is installed but has not been opened yet (no desktop profile); open AI Hub once, then install"
 else report dsh missing "no AI Hub or DSH Desktop profile and CLI"; fi
 workbuddy_settings="$HOME/.workbuddy/settings.json"
-if [ -f "$workbuddy_settings" ]; then report workbuddy-desktop found "$workbuddy_settings"; hosts+=(workbuddy-desktop); else report workbuddy-desktop missing "no $workbuddy_settings"; fi
+workbuddy_app=''
+for candidate in '/Applications/WorkBuddy.app' "$HOME/Applications/WorkBuddy.app"; do
+    if [ -f "$candidate/Contents/Info.plist" ]; then workbuddy_app=$candidate; break; fi
+done
+if [ ! -f "$workbuddy_settings" ]; then report workbuddy-desktop missing "no $workbuddy_settings"
+elif [ -z "$workbuddy_app" ]; then report workbuddy-desktop missing "WorkBuddy settings found, but the WorkBuddy app is not installed"
+else report workbuddy-desktop found "$workbuddy_settings"; hosts+=(workbuddy-desktop); fi
 printf 'HOSTS=%s\n' "${hosts[*]-}"
