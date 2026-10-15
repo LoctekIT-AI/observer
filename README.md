@@ -32,13 +32,13 @@ Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平�
 
 ### 方式一：双击安装（推荐，不需要 AI 助手）
 
-- **Windows**：下载 [Install-Observer-Windows.cmd](https://github.com/LoctekIT-AI/observer/raw/main/install/Install-Observer-Windows.cmd)，双击运行（如果出现“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”）。也可以在 PowerShell 里运行：
+- **Windows**：下载 [Install-Observer-Windows.zip](https://github.com/LoctekIT-AI/observer/raw/main/install/Install-Observer-Windows.zip)，右键 → 全部解压缩，双击里面的 `Install-Observer-Windows.cmd`（如果出现“Windows 已保护你的电脑”，点“更多信息 → 仍要运行”）。也可以在 PowerShell 里运行：
 
   ```powershell
   irm https://raw.githubusercontent.com/LoctekIT-AI/observer/main/install/install-windows.ps1 | iex
   ```
 
-- **macOS**：下载 [Install-Observer-macOS.command](https://github.com/LoctekIT-AI/observer/raw/main/install/Install-Observer-macOS.command)，双击运行（第一次如果提示“无法打开”，右键 → 打开）。也可以在“终端”里运行：
+- **macOS**：下载 [Install-Observer-macOS.zip](https://github.com/LoctekIT-AI/observer/raw/main/install/Install-Observer-macOS.zip)（浏览器一般会自动解压；没有就双击 zip），双击 `Install-Observer-macOS.command`。第一次如果提示无法打开：右键 → 打开；macOS 15 及以上：先点“完成”，再到 系统设置 → 隐私与安全性，点“仍要打开”。也可以在“终端”里运行（不会有这个提示）：
 
   ```bash
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/LoctekIT-AI/observer/main/install/install-macos.sh)"
