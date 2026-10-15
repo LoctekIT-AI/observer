@@ -50,7 +50,7 @@ from typing import Callable  # noqa: E402
 
 BUNDLE = Path(__file__).resolve().parents[1]
 CHANNEL_SCHEMA = "observer.channel.v1"
-MIN_CHECK_INTERVAL = timedelta(hours=1)
+MIN_CHECK_INTERVAL = timedelta(minutes=10)  # only spaces logon and timer runs; the channel file is a plain CDN download
 RETRY_INTERVAL = timedelta(hours=6)
 MAX_ATTEMPTS = 3
 MAX_ARCHIVE_BYTES = 64 * 1024 * 1024

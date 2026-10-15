@@ -190,8 +190,8 @@ def test_no_background_login_disabled_without_key_and_check_interval(tmp_path):
     assert updater.run()["status"] == "login_missing" and installer.calls == []
     net = Net(entry, data)
     updater.fetch = net
-    clock["now"] += timedelta(minutes=20)
-    assert updater.run()["status"] == "login_missing" and net.urls == []  # checked less than an hour ago
+    clock["now"] += timedelta(minutes=5)
+    assert updater.run()["status"] == "login_missing" and net.urls == []  # checked less than 10 minutes ago
     other = _bundle(tmp_path / "nokey", key=None)
     disabled, _ = _updater(tmp_path, other, Net(entry, data), installer)
     assert disabled.run()["status"] == "disabled"
