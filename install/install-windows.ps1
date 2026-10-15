@@ -76,10 +76,25 @@ if (-not $AssumeYes) {
 # 5. 安装（第一次会打开浏览器，用飞书登录一次）
 Write-Host ''
 Write-Host '开始安装。第一次安装会打开浏览器，请用飞书登录；之后不会再要求登录。'
-& $powershell -NoProfile -ExecutionPolicy Bypass -File $all -Archive $archive -Hosts ($selected -join ',')
-if ($LASTEXITCODE -ne 0) { Stop-Install "安装程序返回 $LASTEXITCODE，请把上面的输出发给 AI 平台团队" }
+$resultFile = Join-Path $work 'install-result.tsv'
+$allArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $all, '-Archive', $archive, '-Hosts', ($selected -join ','))
+# Packages from v0.2.35 report each client separately; older ones stop at the first failure.
+$supportsResult = $false
+try { $supportsResult = (Get-Command -Name $all -ErrorAction Stop).Parameters.ContainsKey('ResultFile') } catch { }
+if ($supportsResult) { $allArgs += @('-ResultFile', $resultFile) }
+& $powershell @allArgs
+$code = $LASTEXITCODE
+$failed = @()
+if (Test-Path -LiteralPath $resultFile) {
+    $failed = @(Get-Content -LiteralPath $resultFile -Encoding UTF8 | Where-Object { $_ -match '^failed\t' } | ForEach-Object { ($_ -split "`t")[1] })
+}
+if ($code -ne 0 -and -not ($code -eq 3 -and $failed.Count -gt 0)) { Stop-Install "安装程序返回 $code，请把上面的输出发给 AI 平台团队" }
+$installed = @($selected | Where-Object { $failed -notcontains $_ })
 Write-Host ''
-Write-Host '安装完成。之后采集和上报都在后台自动进行，也会自动更新。' -ForegroundColor Green
-if ($selected -contains 'dsh' -or $selected -contains 'workbuddy-desktop') {
+Write-Host ("安装完成：{0}。之后采集和上报都在后台自动进行，也会自动更新。" -f ($installed -join '、')) -ForegroundColor Green
+if ($failed.Count -gt 0) {
+    Write-Host ("以下客户端没有装上：{0}。其他客户端不受影响；请把上面的输出发给 AI 平台团队。" -f ($failed -join '、')) -ForegroundColor Yellow
+}
+if ($installed -contains 'dsh' -or $installed -contains 'workbuddy-desktop') {
     Write-Host '请把 AI Hub 和 WorkBuddy 完全退出（包括托盘图标）再打开一次。' -ForegroundColor Yellow
 }

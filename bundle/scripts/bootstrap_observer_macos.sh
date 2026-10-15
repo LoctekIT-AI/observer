@@ -118,6 +118,36 @@ from cowork_runtime.telemetry.langfuse import LangfuseConfig
 from cowork_runtime.observer.dsh_worker import DshObserverWorker
 sys.stdout.write(json.dumps({'runtime': 'verified', 'python': sys.version.split()[0], 'dependencies': versions}, sort_keys=True) + '\n')
 PY
+# Version check per client before installing (application versions only). A client too old
+# for this collector is skipped and the others are installed; a newer, untested version, or one
+# whose version cannot be read, is installed with a note. If OBSERVER_RESULT_FILE is set, one line
+# per skipped / noted client is appended to it (<skipped|note> TAB <host> TAB <reason>).
+# Custom test layouts are left to the doctor that runs after the install.
+observer_result_file=${OBSERVER_RESULT_FILE:-}
+case " ${observer_installer_args[*]-} " in
+    *" --install-root"*|*" --launch-agent-dir"*) ;;
+    *)
+        observer_doctor_args=()
+        for observer_host in "${observer_hosts[@]}"; do observer_doctor_args+=(--host "$observer_host"); done
+        if observer_checks=$("$observer_python" "$observer_source/scripts/observer_doctor.py" --compatibility-only "${observer_doctor_args[@]}" 2>/dev/null); then
+            observer_kept=()
+            while IFS=$'\t' read -r observer_check_host observer_check_state observer_check_reason; do
+                [ -n "$observer_check_host" ] || continue
+                case "$observer_check_state" in
+                    supported) observer_kept+=("$observer_check_host") ;;
+                    unsupported)
+                        printf 'Observer bootstrap: skipped %s: %s\n' "$observer_check_host" "$observer_check_reason"
+                        [ -z "$observer_result_file" ] || printf 'skipped\t%s\t%s\n' "$observer_check_host" "$observer_check_reason" >> "$observer_result_file" ;;
+                    *)
+                        observer_kept+=("$observer_check_host")
+                        printf 'Observer bootstrap: note: %s: %s\n' "$observer_check_host" "$observer_check_reason"
+                        [ -z "$observer_result_file" ] || printf 'note\t%s\t%s\n' "$observer_check_host" "$observer_check_reason" >> "$observer_result_file" ;;
+                esac
+            done <<< "$observer_checks"
+            [ "${#observer_kept[@]}" -gt 0 ] || fail 'none of the selected clients has a version this collector supports'
+            observer_hosts=("${observer_kept[@]}")
+        fi ;;
+esac
 observer_dsh=0
 observer_host_args=()
 for observer_host in "${observer_hosts[@]}"; do

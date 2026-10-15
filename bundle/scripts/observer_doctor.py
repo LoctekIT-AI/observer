@@ -163,8 +163,22 @@ def _compatibility_for_host(
             runtime=runtime,
             client_version=client_version,
             minimum=connector.get("min_client_version"),
-            maximum=connector.get("max_client_version"),
+            maximum=None,
         )
+        maximum = connector.get("max_client_version")
+        try:
+            validate_client_version(runtime=runtime, client_version=client_version, minimum=None, maximum=maximum)
+        except ClientCompatibilityError:
+            # Newer than the versions tested: install anyway. Calls the collector cannot read
+            # are counted as unrecognised and the health records name the version.
+            return {
+                "status": "untested",
+                "reason": f"{runtime} client version {client_version} is newer than the tested range (up to {maximum})",
+                "runtime": runtime,
+                "client_version": client_version,
+                "minimum": connector.get("min_client_version"),
+                "maximum": maximum,
+            }
     except ClientCompatibilityError as exc:
         reason = str(exc)
         return {
@@ -182,6 +196,7 @@ def _compatibility_for_host(
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", action="append", choices=HOSTS)
+    parser.add_argument("--compatibility-only", action="store_true", help="print one line per client with its version check and exit")
     parser.add_argument("--launch-agent-label-prefix")
     parser.add_argument("--config-file", type=Path, default=Path.home() / "Library/Application Support/AIHub/observer/customer.env")
     parser.add_argument("--dsh-source", type=Path, default=Path.home() / ".aihub/observer/dsh")
@@ -360,6 +375,14 @@ def main(argv: list[str] | None = None) -> int:
     selected = tuple(dict.fromkeys(args.host or HOSTS))
     config_file = args.config_file.expanduser().resolve()
     compatibility_manifest = _compatibility_manifest()
+    if args.compatibility_only:
+        # One line per client: <host> TAB <supported|untested|unavailable|unsupported> TAB <reason>.
+        # Used by the installer before installing; reads only application versions.
+        for host in selected:
+            result = _compatibility_for_host(host, compatibility_manifest)
+            reason = str(result.get("reason") or result.get("client_version") or "").replace("\t", " ").replace("\n", " ")
+            print(f"{host}\t{result.get('status')}\t{reason}")
+        return 0
     payload: dict[str, object] = {
         "status": "ok",
         "selected_hosts": list(selected),
@@ -413,9 +436,14 @@ def main(argv: list[str] | None = None) -> int:
             payload["status"] = "blocked"
             payload["reasons"].append(f"{host_name} observer is {registration.get('status')}")
         compatibility = host["compatibility"]
-        if compatibility.get("status") != "supported":
+        if compatibility.get("status") == "unsupported":
             payload["status"] = "blocked"
             payload["reasons"].append(
+                f"{host_name} client compatibility is {compatibility.get('status')}: {compatibility.get('reason', 'unknown reason')}"
+            )
+        elif compatibility.get("status") != "supported":
+            # Version newer than tested, or unreadable: the collector still runs; say so.
+            payload.setdefault("warnings", []).append(
                 f"{host_name} client compatibility is {compatibility.get('status')}: {compatibility.get('reason', 'unknown reason')}"
             )
     print(json.dumps(payload, ensure_ascii=False, sort_keys=True))

@@ -75,3 +75,58 @@ def test_any_subset_of_clients_is_detected(tmp_path):
     (home / ".codex/sessions").mkdir(parents=True)
     rows = _detect(home)
     assert [h for h, (state, _) in rows.items() if state == "found"] == ["codex", "workbuddy-desktop"]
+
+
+def _fake_manifest(minimum, maximum):
+    return {"connectors": {"claude": {"runtime": "claude", "min_client_version": minimum, "max_client_version": maximum}}}
+
+
+def test_newer_client_version_is_installed_with_a_note_older_is_skipped(tmp_path, monkeypatch):
+    import observer_doctor
+
+    app = _claude_app(tmp_path)  # version 1.2.3
+    monkeypatch.setattr(observer_doctor.sys, "platform", "darwin")
+    check = lambda lo, hi: observer_doctor._compatibility_for_host("claude", _fake_manifest(lo, hi), app_path=app)
+    assert check("1.0.0", "1.9.9")["status"] == "supported"
+    newer = check("1.0.0", "1.1.0")
+    assert newer["status"] == "untested" and "newer than the tested range" in newer["reason"]
+    assert check("2.0.0", "2.9.9")["status"] == "unsupported"
+
+
+def test_compatibility_only_prints_one_line_per_client(monkeypatch, capsys):
+    import observer_doctor
+
+    results = {"codex": {"status": "supported", "client_version": "0.158.0"}, "claude": {"status": "unsupported", "reason": "too\told"}}
+    monkeypatch.setattr(observer_doctor, "_compatibility_for_host", lambda host, manifest, **_: results[host])
+    assert observer_doctor.main(["--compatibility-only", "--host", "codex", "--host", "claude"]) == 0
+    assert capsys.readouterr().out.splitlines() == ["codex\tsupported\t0.158.0", "claude\tunsupported\ttoo old"]
+
+
+def _precheck_block() -> str:
+    text = (SCRIPTS / "bootstrap_observer_macos.sh").read_text()
+    start = text.index("observer_result_file=${OBSERVER_RESULT_FILE:-}")
+    return text[start:text.index("observer_dsh=0", start)]
+
+
+def test_bootstrap_skips_only_too_old_clients(tmp_path):
+    fake = tmp_path / "python"
+    fake.write_text("#!/bin/bash\nprintf 'codex\\tsupported\\t0.1\\nclaude\\tunsupported\\ttoo old\\nworkbuddy-desktop\\tuntested\\tnewer\\n'\n")
+    fake.chmod(0o755)
+    result = tmp_path / "result.tsv"
+    script = ("set -euo pipefail\nfail() { echo \"FAIL $1\"; exit 2; }\nobserver_installer_args=()\n"
+              f"observer_python={fake}\nobserver_source={tmp_path}\nobserver_hosts=(codex claude workbuddy-desktop)\n"
+              + _precheck_block() + 'echo "HOSTS=${observer_hosts[*]}"\n')
+    out = subprocess.run(["bash", "-c", script], env={**os.environ, "OBSERVER_RESULT_FILE": str(result)},
+                         capture_output=True, text=True, check=True).stdout
+    assert out.strip().splitlines()[-1] == "HOSTS=codex workbuddy-desktop"
+    assert result.read_text().splitlines() == ["skipped\tclaude\ttoo old", "note\tworkbuddy-desktop\tnewer"]
+
+
+def test_bootstrap_stops_when_every_client_is_too_old(tmp_path):
+    fake = tmp_path / "python"
+    fake.write_text("#!/bin/bash\nprintf 'claude\\tunsupported\\ttoo old\\n'\n")
+    fake.chmod(0o755)
+    script = ("set -euo pipefail\nfail() { echo \"FAIL $1\"; exit 2; }\nobserver_installer_args=()\n"
+              f"observer_python={fake}\nobserver_source={tmp_path}\nobserver_hosts=(claude)\n" + _precheck_block())
+    done = subprocess.run(["bash", "-c", script], capture_output=True, text=True)
+    assert done.returncode == 2 and "FAIL none of the selected clients" in done.stdout

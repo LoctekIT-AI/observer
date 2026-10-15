@@ -52,6 +52,13 @@ fi
 args=(); for name in $selected; do args+=(--host "$name"); done
 
 printf '\n开始安装。第一次安装会打开浏览器，请用飞书登录；之后不会再要求登录。\n'
-/bin/bash "$work/source/scripts/bootstrap_observer_macos.sh" --archive "$archive" "${args[@]}" --authorize || fail '安装程序出错，请把上面的输出发给 AI 平台团队'
-printf '\n安装完成。之后采集和上报都在后台自动进行，也会自动更新。\n'
-case " $selected " in *" dsh "*|*" workbuddy-desktop "*) printf '请把 AI Hub 和 WorkBuddy 完全退出（Cmd+Q）再打开一次。\n' ;; esac
+result="$work/result.tsv"; : > "$result"
+OBSERVER_RESULT_FILE=$result /bin/bash "$work/source/scripts/bootstrap_observer_macos.sh" --archive "$archive" "${args[@]}" --authorize || fail '安装程序出错，请把上面的输出发给 AI 平台团队'
+skipped=$(/usr/bin/awk -F '\t' '$1 == "skipped" { print $2 }' "$result" | /usr/bin/tr '\n' ' ')
+noted=$(/usr/bin/awk -F '\t' '$1 == "note" { print $2 }' "$result" | /usr/bin/tr '\n' ' ')
+installed=''
+for name in $selected; do case " $skipped " in *" $name "*) ;; *) installed="$installed $name" ;; esac; done
+printf '\n安装完成：%s。之后采集和上报都在后台自动进行，也会自动更新。\n' "${installed# }"
+[ -z "$skipped" ] || printf '已跳过（客户端版本太旧，Observer 还不支持）：%s。其他客户端不受影响；升级这个客户端后再双击安装一次即可。\n' "${skipped% }"
+[ -z "$noted" ] || printf '提示：%s 的版本比测试过的新（或读不到版本），已照常安装；读不懂的调用会单独统计，不影响使用。\n' "${noted% }"
+case " $installed " in *" dsh "*|*" workbuddy-desktop "*) printf '请把 AI Hub 和 WorkBuddy 完全退出（Cmd+Q）再打开一次。\n' ;; esac

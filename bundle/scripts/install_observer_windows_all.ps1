@@ -11,7 +11,9 @@ param(
     [ValidateSet('install','status')][string]$Mode = 'install',
     [switch]$DetectOnly,
     # Used by the self-updater: never open a login page, skip clients that are no longer installed.
-    [switch]$Unattended
+    [switch]$Unattended,
+    # Optional: one line per client is written here (ok|failed TAB host TAB message).
+    [string]$ResultFile
 )
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot 'observer_windows_common.ps1')
@@ -79,6 +81,8 @@ if ($selected.Count -eq 0) { throw 'No supported desktop AI client was detected'
 if ($Mode -eq 'install' -and -not $Archive) { throw '-Archive is required for install' }
 $single = Join-Path $PSScriptRoot 'install_observer_windows.ps1'
 $failedHosts = @()
+$okHosts = @()
+$results = @()
 foreach ($hostId in $selected) {
     if (-not $detected[$hostId]) {
         if ($Unattended) { Write-Output "=== skip $hostId (not detected on this machine)"; continue }
@@ -101,13 +105,19 @@ foreach ($hostId in $selected) {
         }
     }
     Write-Output "=== $Mode $hostId"
-    if ($Unattended) {
-        # Self-update: one client failing (its previous setup is restored) must not stop the others.
-        try { & $single @common } catch { Write-Output "=== FAILED $hostId : $($_.Exception.Message)"; $failedHosts += $hostId }
-    } else {
+    # One client failing (its previous setup is restored) must not stop the others.
+    try {
         & $single @common
+        $okHosts += $hostId
+        $results += ("ok`t{0}`t" -f $hostId)
+    } catch {
+        $message = ($_.Exception.Message -replace '[\t\r\n]+', ' ')
+        Write-Output "=== FAILED $hostId : $message"
+        $failedHosts += $hostId
+        $results += ("failed`t{0}`t{1}" -f $hostId, $message)
     }
 }
+if ($ResultFile) { Set-Content -LiteralPath $ResultFile -Value $results -Encoding UTF8 }
 if ($Mode -eq 'install') {
     # Signed self-update (scripts\observer_update.py). The collectors keep working without it.
     try {
@@ -116,4 +126,9 @@ if ($Mode -eq 'install') {
         Write-Warning "Observer: the self-update task could not be registered: $($_.Exception.Message)"
     }
 }
-if ($failedHosts.Count -gt 0) { throw ("Observer install failed for: " + ($failedHosts -join ', ')) }
+if ($failedHosts.Count -gt 0) {
+    $message = "Observer install failed for: " + ($failedHosts -join ', ')
+    # Interactive install with at least one client installed: report it and exit 3 (partial).
+    if (-not $Unattended -and $okHosts.Count -gt 0) { Write-Output "=== $message"; exit 3 }
+    throw $message
+}
