@@ -33,11 +33,32 @@ from install_dsh_observer import macos_default_dsh  # noqa: E402
 from cowork_runtime.telemetry.langfuse import LangfuseConfig, LangfuseExportError
 
 HOSTS = ("dsh", "codex", "claude", "workbuddy-desktop")
-_MACOS_CLIENT_APPS = {
-    "dsh": macos_default_dsh()["app"],  # AI Hub when installed, else DSH Desktop
-    "claude": Path("/Applications/Claude.app"),
-    "workbuddy": Path("/Applications/WorkBuddy.app"),
-}
+# macOS apps whose Info.plist gives the client version. Apps can live in /Applications or
+# ~/Applications (a per-user install); Claude is also looked up by bundle id via Spotlight.
+_MACOS_APP_NAMES = {"claude": ("Claude.app", "com.anthropic.claudefordesktop"), "workbuddy": ("WorkBuddy.app", None)}
+
+
+def macos_app_path(runtime: str, home: Path | None = None) -> Path | None:
+    if runtime == "dsh":
+        return macos_default_dsh()["app"]  # AI Hub when installed, else DSH Desktop
+    entry = _MACOS_APP_NAMES.get(runtime)
+    if entry is None:
+        return None
+    name, bundle_id = entry
+    candidates = [Path("/Applications") / name, (home or Path.home()) / "Applications" / name]
+    for candidate in candidates:
+        if (candidate / "Contents" / "Info.plist").is_file():
+            return candidate
+    if bundle_id and sys.platform == "darwin" and Path("/usr/bin/mdfind").exists():
+        try:
+            found = subprocess.run(["/usr/bin/mdfind", f"kMDItemCFBundleIdentifier == '{bundle_id}'"],
+                                   capture_output=True, text=True, check=False, timeout=5).stdout.splitlines()
+        except (OSError, subprocess.SubprocessError):
+            found = []
+        for line in found:
+            if line.endswith(".app") and (Path(line) / "Contents" / "Info.plist").is_file():
+                return Path(line)
+    return candidates[0]
 
 
 def _compatibility_manifest() -> dict[str, object] | None:
@@ -134,7 +155,7 @@ def _compatibility_for_host(
         else:
             if sys.platform != "darwin":
                 return {"status": "unavailable", "reason": "macOS application version is unavailable"}
-            bundle_path = app_path or _MACOS_CLIENT_APPS.get(runtime)
+            bundle_path = app_path or macos_app_path(runtime)
             if bundle_path is None:
                 return {"status": "unavailable", "reason": f"client bundle path is unavailable: {runtime}"}
             client_version = detect_macos_bundle_version(bundle_path)

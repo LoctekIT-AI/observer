@@ -7,7 +7,17 @@ report() { printf '%s\t%s\t%s\n' "$1" "$2" "$3"; }
 codex_source="$HOME/.codex/sessions"
 if [ -d "$codex_source" ]; then report codex found "$codex_source"; hosts+=(codex); else report codex missing "no $codex_source"; fi
 claude_source="$HOME/Library/Application Support/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb"
-if [ -d "$claude_source" ]; then report claude found "$claude_source"; hosts+=(claude); else report claude missing "no Claude Desktop IndexedDB"; fi
+claude_app=''
+for candidate in '/Applications/Claude.app' "$HOME/Applications/Claude.app"; do
+    if [ -f "$candidate/Contents/Info.plist" ]; then claude_app=$candidate; break; fi
+done
+if [ -z "$claude_app" ] && [ -x /usr/bin/mdfind ]; then
+    claude_app=$(/usr/bin/mdfind "kMDItemCFBundleIdentifier == 'com.anthropic.claudefordesktop'" 2>/dev/null | /usr/bin/grep '\.app$' | /usr/bin/head -n 1 || true)
+    [ -n "$claude_app" ] && [ -f "$claude_app/Contents/Info.plist" ] || claude_app=''
+fi
+if [ ! -d "$claude_source" ]; then report claude missing "no Claude Desktop IndexedDB"
+elif [ -z "$claude_app" ]; then report claude missing "Claude Desktop data found, but the Claude app is not installed"
+else report claude found "$claude_source"; hosts+=(claude); fi
 # AI Hub (the company build of DeepSeek Harness) first, then the older DSH Desktop layout.
 aihub_profile="$HOME/Library/Application Support/AI Hub/ah-home/profiles/desktop"
 aihub_cli='/Applications/AI Hub.app/Contents/Resources/runtime/cli/bin/dsh'

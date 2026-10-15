@@ -153,7 +153,9 @@ if [ "$observer_authorize" -eq 1 ] && [ "${#observer_replace[@]}" -eq 0 ] && [ -
 elif [ "$observer_authorize" -eq 1 ]; then
     "$observer_python" "$observer_source/scripts/observer_authorize.py" --client-type "${observer_hosts[0]}" --config-file "$observer_config" --auth-origin "$observer_auth_origin" ${observer_replace[@]+"${observer_replace[@]}"}
 fi
-"$observer_python" "$observer_installer" install "$observer_archive" "${observer_host_args[@]}" --config-file "$observer_config" --python "$observer_python" --runtime-root "$observer_runtime" ${observer_installer_args[@]+"${observer_installer_args[@]}"}
+observer_install_rc=0
+"$observer_python" "$observer_installer" install "$observer_archive" "${observer_host_args[@]}" --config-file "$observer_config" --python "$observer_python" --runtime-root "$observer_runtime" ${observer_installer_args[@]+"${observer_installer_args[@]}"} || observer_install_rc=$?
+# The updater is registered even when a client failed, so a later fixed version can still arrive.
 # Signed self-update (scripts/observer_update.py): one LaunchAgent for all clients.
 # Custom test layouts manage their own agents and are left alone.
 observer_updater="$HOME/Library/Application Support/AIHub/observer/bundle/scripts/observer_update.py"
@@ -164,3 +166,4 @@ case " ${observer_installer_args[*]-} " in
             "$observer_python" "$observer_updater" register --python "$observer_python" || printf '%s\n' 'Observer bootstrap: warning: self-update LaunchAgent could not be registered' >&2
         fi ;;
 esac
+exit "$observer_install_rc"
