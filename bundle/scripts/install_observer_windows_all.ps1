@@ -32,25 +32,32 @@ $dshCliCandidates = @(
     (Join-Path ${env:ProgramFiles} 'DSH Desktop\resources\app\node_modules\@deepseek-ai\dsh\lib\bin.js')
 )
 $dshCli = $dshCliCandidates | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-# DeepSeek Harness (Windows desktop DSH): profile under ~\.dsh, DSH runs from app.asar
-# through the app's own launcher resources\runtime\cli\bin\dsh.cmd.
-$harnessProfile = Join-Path $env:USERPROFILE '.dsh\profiles\desktop'
-if (-not $dshCli -and (Test-Path -LiteralPath (Join-Path $harnessProfile 'package.json') -PathType Leaf)) {
+# DeepSeek Harness builds run DSH from app.asar through the app's own launcher
+# resources\runtime\cli\bin\dsh.cmd. AI Hub (the company build) keeps its DSH home
+# under %APPDATA%\AI Hub\ah-home; older Harness builds use ~\.dsh. Both use the
+# reserved "desktop" profile. AI Hub is preferred when both are set up.
+$harnessCandidates = @(
+    @{ Profile = (Join-Path $env:APPDATA 'AI Hub\ah-home\profiles\desktop'); Name = 'AI Hub'; Dirs = @((Join-Path $env:LOCALAPPDATA 'Programs\AI Hub'), (Join-Path ${env:ProgramFiles} 'AI Hub')) },
+    @{ Profile = (Join-Path $env:USERPROFILE '.dsh\profiles\desktop'); Name = 'DeepSeek Harness'; Dirs = @((Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness'), (Join-Path ${env:ProgramFiles} 'DeepSeek Harness')) }
+)
+foreach ($candidate in $harnessCandidates) {
+    if ($dshCli) { break }
+    if (-not (Test-Path -LiteralPath (Join-Path $candidate.Profile 'package.json') -PathType Leaf)) { continue }
     $harnessDirs = @()
-    $harnessDirs += @(Get-Process -Name 'DeepSeek Harness' -ErrorAction SilentlyContinue | ForEach-Object { try { Split-Path -Parent $_.Path } catch { } })
+    $harnessDirs += @(Get-Process -Name $candidate.Name -ErrorAction SilentlyContinue | ForEach-Object { try { Split-Path -Parent $_.Path } catch { } })
     foreach ($key in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
         # Strict mode: uninstall entries do not all have DisplayName / InstallLocation / DisplayIcon.
         $harnessDirs += @(Get-ItemProperty -Path $key -ErrorAction SilentlyContinue | ForEach-Object {
             $props = $_.PSObject.Properties
-            if ($props['DisplayName'] -and "$($props['DisplayName'].Value)" -like 'DeepSeek Harness*') {
+            if ($props['DisplayName'] -and "$($props['DisplayName'].Value)" -like ($candidate.Name + '*')) {
                 if ($props['InstallLocation'] -and $props['InstallLocation'].Value) { "$($props['InstallLocation'].Value)".Trim('"') }
                 elseif ($props['DisplayIcon'] -and $props['DisplayIcon'].Value) { Split-Path -Parent ("$($props['DisplayIcon'].Value)".Trim('"') -replace ',\d+$', '') }
             } })
     }
-    $harnessDirs += @((Join-Path $env:LOCALAPPDATA 'Programs\DeepSeek Harness'), (Join-Path ${env:ProgramFiles} 'DeepSeek Harness'))
+    $harnessDirs += $candidate.Dirs
     $dshCli = $harnessDirs | Where-Object { $_ } | ForEach-Object { Join-Path $_ 'resources\runtime\cli\bin\dsh.cmd' } |
         Where-Object { Test-Path -LiteralPath $_ -PathType Leaf } | Select-Object -First 1
-    if ($dshCli) { $dshProfile = $harnessProfile }
+    if ($dshCli) { $dshProfile = $candidate.Profile }
 }
 $detected = [ordered]@{
     'codex' = (Test-Path -LiteralPath $codexSource -PathType Container)
@@ -58,8 +65,8 @@ $detected = [ordered]@{
     'dsh' = ((Test-Path -LiteralPath (Join-Path $dshProfile 'package.json') -PathType Leaf) -and [bool]$dshCli)
     'workbuddy-desktop' = (Test-Path -LiteralPath $workbuddySettings -PathType Leaf)
 }
-if (-not $detected['dsh'] -and (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.dsh\profiles') -PathType Container)) {
-    Write-Output "dsh`tfound-incomplete (~\.dsh profile present but the DeepSeek Harness launcher was not found; skipped)"
+if (-not $detected['dsh'] -and ((Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.dsh\profiles') -PathType Container) -or (Test-Path -LiteralPath (Join-Path $env:APPDATA 'AI Hub\ah-home\profiles') -PathType Container))) {
+    Write-Output "dsh`tfound-incomplete (an AI Hub / DeepSeek Harness profile is present but its launcher was not found; skipped)"
 }
 foreach ($name in $detected.Keys) { Write-Output ("{0}`t{1}" -f $name, $(if ($detected[$name]) { 'found' } else { 'missing' })) }
 # 'powershell -File' passes '-Hosts a,b' as one string: accept comma or space separated names.

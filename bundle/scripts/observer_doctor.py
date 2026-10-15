@@ -28,11 +28,13 @@ from cowork_runtime.plugin_package.client_compatibility import (
 )
 from cowork_runtime.plugin_package.compatibility import load_bundle_manifest
 from cowork_runtime.plugin_package.workbuddy_runtime import inspect_workbuddy_command
+sys.path.insert(0, str(SCRIPT_ROOT / "scripts"))
+from install_dsh_observer import macos_default_dsh  # noqa: E402
 from cowork_runtime.telemetry.langfuse import LangfuseConfig, LangfuseExportError
 
 HOSTS = ("dsh", "codex", "claude", "workbuddy-desktop")
 _MACOS_CLIENT_APPS = {
-    "dsh": Path("/Applications/DSH Desktop.app"),
+    "dsh": macos_default_dsh()["app"],  # AI Hub when installed, else DSH Desktop
     "claude": Path("/Applications/Claude.app"),
     "workbuddy": Path("/Applications/WorkBuddy.app"),
 }
@@ -162,7 +164,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--launch-agent-label-prefix")
     parser.add_argument("--config-file", type=Path, default=Path.home() / "Library/Application Support/AIHub/observer/customer.env")
     parser.add_argument("--dsh-source", type=Path, default=Path.home() / ".aihub/observer/dsh")
-    parser.add_argument("--dsh-profile-dir", type=Path, default=Path.home() / "Library/Application Support/dsh-desktop/harness/profiles/web")
+    parser.add_argument("--dsh-profile-dir", type=Path, default=macos_default_dsh()["profile"])
     parser.add_argument("--dsh-plist", type=Path, default=Path.home() / "Library/LaunchAgents/com.observer.dsh-observer.plist")
     parser.add_argument("--dsh-state-dir", type=Path, default=Path.home() / "Library/Application Support/AIHub/dsh-observer")
     parser.add_argument("--codex-source", type=Path, default=Path.home() / ".codex/sessions")

@@ -22,6 +22,7 @@ if not getattr(sys, "frozen", False):
 
 sys.path.insert(0, str(SCRIPT_ROOT / "scripts"))
 import install_workbuddy_hooks as workbuddy_hooks
+from install_dsh_observer import dsh_command, is_harness_launcher, macos_default_dsh
 
 from cowork_runtime.plugin_package import PluginArchiveInstallError, PluginArchiveInstaller
 from cowork_runtime.telemetry.langfuse import LangfuseConfig, LangfuseExportError, LangfuseExporter
@@ -51,8 +52,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--launch-agent-label-prefix", help="explicit isolated registration prefix")
     parser.add_argument("--launch-agent-dir", type=Path, help="explicit isolated plist directory")
     parser.add_argument("--dsh-source", type=Path, default=Path.home() / ".aihub/observer/dsh")
-    parser.add_argument("--dsh-profile-dir", type=Path, default=Path.home() / "Library/Application Support/dsh-desktop/harness/profiles/web")
-    parser.add_argument("--dsh-cli", type=Path, default=Path("/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai/dsh/lib/bin.js"))
+    dsh_defaults = macos_default_dsh()
+    parser.add_argument("--dsh-profile-dir", type=Path, default=dsh_defaults["profile"])
+    parser.add_argument("--dsh-cli", type=Path, default=dsh_defaults["cli"])
     parser.add_argument("--dsh-state-dir", type=Path, default=Path.home() / "Library/Application Support/AIHub/dsh-observer")
     parser.add_argument("--codex-source", type=Path, default=DEFAULT_CODEX_SOURCE)
     parser.add_argument("--claude-source", type=Path, default=DEFAULT_CLAUDE_SOURCE)
@@ -376,13 +378,13 @@ def _restore_dsh_plugin(args: argparse.Namespace, previous_dependency: str | Non
     if previous_dependency is None:
         return _run_host([sys.executable, str(root / "scripts/install_dsh_observer.py"), "uninstall", "--profile-dir", str(_absolute(args.dsh_profile_dir)), "--dsh-cli", str(_absolute(args.dsh_cli))])
     node = shutil.which("node")
-    if node is None:
+    if node is None and not is_harness_launcher(_absolute(args.dsh_cli)):
         return {"status": "blocked", "reason": "Node executable is unavailable for native profile rollback"}
     profile = _absolute(args.dsh_profile_dir)
     spec = previous_dependency
     if spec.startswith("file:"):
         spec = "file:" + str((profile / spec[5:]).resolve())
-    command = [node, str(_absolute(args.dsh_cli)), "plugin", "--profile", profile.name, "add", "@observer/dsh-observer@" + spec]
+    command = dsh_command(_absolute(args.dsh_cli), Path(node) if node else None, "plugin", "--profile", profile.name, "add", "@observer/dsh-observer@" + spec)
     result = subprocess.run(command, cwd=profile, env={**os.environ, "DSH_HOME": str(profile.parent.parent)}, capture_output=True, text=True, check=False)
     return {"status": "ok" if result.returncode == 0 else "blocked", "returncode": result.returncode, "reason": "previous native Observer dependency restored" if result.returncode == 0 else (result.stderr or result.stdout).strip()}
 

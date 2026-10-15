@@ -55,6 +55,10 @@ observer_validate_bootstrap_layout() {
     local bundle="$HOME/Library/Application Support/AIHub/observer/bundle" host option value state source lock plist
     local dsh_source="$HOME/.aihub/observer/dsh" dsh_state="$HOME/Library/Application Support/AIHub/dsh-observer"
     local dsh_profile="$HOME/Library/Application Support/dsh-desktop/harness/profiles/web" dsh_cli='/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai/dsh/lib/bin.js'
+    # Same default choice as install_dsh_observer.macos_default_dsh: AI Hub when it is set up.
+    if [ -f '/Applications/AI Hub.app/Contents/Resources/runtime/cli/bin/dsh' ] && [ -f "$HOME/Library/Application Support/AI Hub/ah-home/profiles/desktop/package.json" ]; then
+        dsh_profile="$HOME/Library/Application Support/AI Hub/ah-home/profiles/desktop"; dsh_cli='/Applications/AI Hub.app/Contents/Resources/runtime/cli/bin/dsh'
+    fi
     local codex_source="$HOME/.codex/sessions" codex_state="$HOME/Library/Application Support/AIHub/observer"
     local claude_source="$HOME/Library/Application Support/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb" claude_state="$HOME/Library/Application Support/AIHub/claude-observer"
     local workbuddy_source="$HOME/.aihub/observer/workbuddy-hook-events.jsonl" workbuddy_state="$HOME/Library/Application Support/AIHub/workbuddy-observer" workbuddy_settings="$HOME/.workbuddy/settings.json"

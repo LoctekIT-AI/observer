@@ -21,8 +21,26 @@ HARNESS_DESKTOP_VERSIONS = {"0.2.0-rc.2"}
 
 
 def is_harness_launcher(dsh_cli: Path) -> bool:
-    """DeepSeek Harness (Windows) ships DSH inside app.asar behind runtime/cli/bin/dsh.cmd."""
-    return dsh_cli.name.lower() == "dsh.cmd" and dsh_cli.parent.name == "bin" and dsh_cli.parents[1].name == "cli"
+    """DeepSeek Harness builds (including the company's AI Hub) ship DSH inside app.asar
+    behind runtime/cli/bin/dsh.cmd (Windows) or runtime/cli/bin/dsh (macOS)."""
+    return dsh_cli.name.lower() in {"dsh.cmd", "dsh"} and dsh_cli.parent.name == "bin" and dsh_cli.parents[1].name == "cli"
+
+
+# macOS defaults. AI Hub (the company build of DeepSeek Harness) keeps its DSH home
+# under Electron userData and uses the reserved "desktop" profile; the older DSH
+# Desktop layout is the fallback.
+AIHUB_APP = Path("/Applications/AI Hub.app")
+LEGACY_DSH_APP = Path("/Applications/DSH Desktop.app")
+
+
+def macos_default_dsh(home: Path | None = None, aihub_app: Path = AIHUB_APP) -> dict[str, Path]:
+    home = home or Path.home()
+    launcher = aihub_app / "Contents/Resources/runtime/cli/bin/dsh"
+    profile = home / "Library/Application Support/AI Hub/ah-home/profiles/desktop"
+    if launcher.is_file() and (profile / "package.json").is_file():
+        return {"app": aihub_app, "cli": launcher, "profile": profile}
+    return {"app": LEGACY_DSH_APP, "cli": LEGACY_DSH_APP / "Contents/Resources/app/node_modules/@deepseek-ai/dsh/lib/bin.js",
+        "profile": home / "Library/Application Support/dsh-desktop/harness/profiles/web"}
 
 
 def dsh_command(dsh_cli: Path, node: Path | None, *arguments: str) -> list[str]:
