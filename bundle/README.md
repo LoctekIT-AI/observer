@@ -15,7 +15,7 @@ When the plugin is installed from the normal WorkBuddy UI, its Hook process may 
 
 ## One-sentence installation (what the user says)
 
-The user only says, in any one of the four desktop clients: **给我下载这个插件：https://github.com/reyfeng9-glitch/observer** (or the release link). Observer is an internal AI-usage statistics tool deployed by the user's company. The assistant explains what it is, obtains the user's consent (step 3), then does everything below. The installer uses default paths and the Feishu login, so it needs no paths, IDs or keys from the user; if anything asks for a key, stop and tell the user.
+The user only says, in any one of the four desktop clients: **给我下载这个插件：https://github.com/LoctekIT-AI/observer** (or the release link). Observer is an internal AI-usage statistics tool deployed by the user's company. The assistant explains what it is, obtains the user's consent (step 3), then does everything below. The installer uses default paths and the Feishu login, so it needs no paths, IDs or keys from the user; if anything asks for a key, stop and tell the user.
 
 1. Open the GitHub releases of that repository and take the newest release (pre-releases included for this test build). Download its `observer-v*.zip` and the matching `.sha256` asset; verify the SHA-256, inspect ZIP paths, then extract to a dedicated directory.
 2. Detect which supported clients are installed on this machine (read-only):

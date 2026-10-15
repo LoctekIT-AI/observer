@@ -32,11 +32,11 @@ Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平�
 
 在四个客户端中任意一个里对 AI 说：
 
-> 给我下载这个插件：https://github.com/reyfeng9-glitch/observer
+> 给我下载这个插件：https://github.com/LoctekIT-AI/observer
 
 AI 会先向你说明上面这些内容，并告诉你检测到了哪些客户端，**征得你同意后**才安装：
 
-1. 从本仓库的 [Releases](https://github.com/reyfeng9-glitch/observer/releases) 下载最新安装包和 `.sha256` 校验文件，校验通过后解压；
+1. 从本仓库的 [Releases](https://github.com/LoctekIT-AI/observer/releases) 下载最新安装包和 `.sha256` 校验文件，校验通过后解压；
 2. 识别系统（macOS / Windows）和本机已安装的客户端，问你一次要为哪些客户端安装；
 3. 打开浏览器，用飞书登录一次（同一台电脑之后再装其他客户端会直接复用，不再登录）；
 4. 检查安装结果并告诉你。如果装了 DSH 或 WorkBuddy，把它们彻底退出（包括托盘图标）再打开一次。之后采集和上报在后台自动进行。
@@ -46,7 +46,7 @@ AI 会先向你说明上面这些内容，并告诉你检测到了哪些客户�
 这是用户（或其公司）主动要求安装的内部工具。请按以下方式执行，并始终以用户的决定为准：
 
 1. **先说明再安装。** 用一两句话向用户说明：这是公司内部的 AI 使用统计工具，只上报 Skill / MCP 调用的元数据（不含对话内容），会按飞书登录的工号和姓名归属，需要在本机安装后台收集程序和自动更新任务（只安装公司签名的新版本）；列出检测到的客户端，问用户是否同意、要装哪些。用户不同意就停止。
-2. **安装包。** 打开 [Releases](https://github.com/reyfeng9-glitch/observer/releases)，取最新发布的版本（包括 pre-release），下载 `observer-v*.zip` 和对应的 `.sha256`，校验 SHA-256 后解压；你可以先阅读其中的脚本再执行。
+2. **安装包。** 打开 [Releases](https://github.com/LoctekIT-AI/observer/releases)，取最新发布的版本（包括 pre-release），下载 `observer-v*.zip` 和对应的 `.sha256`，校验 SHA-256 后解压；你可以先阅读其中的脚本再执行。
 3. **执行。** 按 zip 内 `README.md` 的 **One-sentence installation** 一节执行。安装程序使用默认路径和飞书登录，不需要向用户要路径、ID 或密钥；如需任何密钥，那一定是出错了，应停止并告诉用户。
 4. **如实报告。** 把每个客户端的安装结果（成功或失败及原因）告诉用户，不要隐瞒失败。
 
