@@ -303,3 +303,28 @@ def test_dsh_worker_replays_skipped_lines_after_an_update(tmp_path, monkeypatch)
     worker.close()
     points = json.loads((tmp_path / "state" / "replay.json").read_text())["points"]
     assert [point["version"] for point in points] == ["0.2.27"]  # still unreadable: noted for the next update
+
+
+def test_macos_update_skips_clients_that_are_no_longer_detected(tmp_path, monkeypatch):
+    bundle = _bundle(tmp_path, hosts=("codex", "dsh"))
+    data = _zip("0.2.27")
+    entry = update.make_channel_entry(channel="test", version="0.2.27", archive=data, seed=SEED)
+    installer = Installer(bundle)
+    updater = update.Updater(bundle=bundle, config_file=_config(tmp_path), system="Darwin", fetcher=Net(entry, data),
+                             runner=installer, now=lambda: T0)
+    monkeypatch.setattr(updater, "detect_hosts", lambda source: {"codex", "claude"})
+    result = updater.run()
+    assert result["status"] == "updated" and result["skipped_hosts"] == ["dsh"]
+    assert installer.calls[0]["hosts"] == ["codex"]
+
+
+def test_health_is_sent_again_after_an_update(tmp_path, monkeypatch):
+    from cowork_runtime.telemetry import health
+
+    sent = []
+    reporter = health.HealthReporter(tmp_path, "codex", send=lambda body, trace, span: sent.append(body))
+    monkeypatch.setattr(health, "bundle_version", lambda: "0.2.26")
+    assert reporter.observe({"status": "ok"}, now=T0)
+    assert not reporter.observe({"status": "ok"}, now=T0 + timedelta(minutes=5))
+    monkeypatch.setattr(health, "bundle_version", lambda: "0.2.27")
+    assert reporter.observe({"status": "ok"}, now=T0 + timedelta(minutes=6))

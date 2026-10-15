@@ -247,6 +247,7 @@ class ClaudeDesktopObserverWorker:
         guarded = (cursor is None and table) or str(source) in self._guarded
         installed_at = getattr(self, "_installed_at", None) if guarded else None
         events = []
+        unreadable_old = 0
         for event in result.events:
             if event.component_kind not in {"skill", "mcp_tool"} and not is_degraded(event):
                 continue
@@ -255,12 +256,18 @@ class ClaudeDesktopObserverWorker:
             # the installation and calls already reported from another file.
             if installed_at is not None and event.occurred_at < installed_at:
                 continue
+            # A table read for the first time also holds calls from long before the
+            # installation; an unreadable one has no readable time, so it is not
+            # counted (the replay below still re-reads it after an update).
+            if installed_at is not None and is_degraded(event):
+                unreadable_old += 1
+                continue
             if event.stage != "started" and self.outbox.has_invocation(event.invocation_id, event.stage):
                 continue
             events.append(event)
         degraded = sum(1 for event in events if is_degraded(event) and event.stage != "started")
         self._unrecognized += degraded
-        if degraded:
+        if degraded or unreadable_old:
             self.replay.note(INSTALLATION_ID, str(source), identity, start, guarded=installed_at is not None)
         terminal = 0
         for event in events:

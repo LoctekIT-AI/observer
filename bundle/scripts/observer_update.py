@@ -501,6 +501,15 @@ class Updater:
         safe_extract(archive, source)
         if bundle_version(source) != available:
             raise UpdateError("archive_mismatch", "manifest version")
+        detected = self.detect_hosts(source)
+        if detected is not None:
+            # A client that was removed or moved must not block the update of the others
+            # (Windows: install_observer_windows_all.ps1 -Unattended skips it the same way).
+            skipped = [host for host in hosts if host not in detected]
+            hosts = [host for host in hosts if host in detected]
+            state["skipped_hosts"] = skipped
+            if not hosts:
+                raise UpdateError("no_hosts", "no installed client was detected")
         log = self.state_dir / "install.log"
         code = self.runner(source=source, archive=archive, hosts=hosts, log=log)
         if code != 0:
@@ -511,6 +520,20 @@ class Updater:
         return self._finish(state, "updated", updated_to=available, updated_at=_iso(self.now()), attempts={}, last_error=None)
 
     # ---- installer
+    def detect_hosts(self, source: Path) -> set[str] | None:
+        """macOS: the clients the new version's detection finds (None = not checked)."""
+        if self.system != "Darwin":
+            return None
+        script = source / "scripts" / "observer_detect_clients_macos.sh"
+        try:
+            result = subprocess.run(["/bin/bash", str(script)], capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise UpdateError("detect_failed", type(exc).__name__) from exc
+        lines = [line for line in result.stdout.splitlines() if line.startswith("HOSTS=")]
+        if result.returncode or not lines:
+            raise UpdateError("detect_failed", f"exit {result.returncode}")
+        return set(lines[-1][len("HOSTS="):].split())
+
     def installer_command(self, *, source: Path, archive: Path, hosts: list[str]) -> list[str]:
         if self.system == "Windows":
             powershell = Path(os.environ.get("SystemRoot", r"C:\Windows")) / "System32/WindowsPowerShell/v1.0/powershell.exe"

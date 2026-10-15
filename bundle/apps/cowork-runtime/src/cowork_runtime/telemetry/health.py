@@ -156,9 +156,11 @@ class HealthReporter:
                     totals[name] = value  # current values, not sums
             state["totals"] = totals
             last_sent = state.get("last_sent_at")
+            version = bundle_version()
             due = (
                 last_sent is None
                 or state.get("last_status") != status.get("status")
+                or state.get("last_version") != version
                 or (current - datetime.fromisoformat(last_sent)).total_seconds() >= self.interval_seconds
             )
             sent = False
@@ -168,6 +170,7 @@ class HealthReporter:
                     (self._send or _default_send)(body, trace_id, span_id)
                     state["last_sent_at"] = current.isoformat()
                     state["last_status"] = status.get("status")
+                    state["last_version"] = version
                     state.pop("last_send_error", None)
                     sent = True
                 except Exception as exc:  # health must never break collection
