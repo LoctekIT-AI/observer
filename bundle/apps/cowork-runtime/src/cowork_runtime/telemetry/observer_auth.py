@@ -15,6 +15,8 @@ import json
 import math
 import os
 import secrets
+import subprocess
+import sys
 import threading
 import time
 import urllib.parse
@@ -251,6 +253,20 @@ class _CallbackHandler(BaseHTTPRequestHandler):
         return
 
 
+def _open_system_browser(url: str) -> bool:
+    """Open the default browser in front. macOS: /usr/bin/open (Python's osascript route can
+    stay silent); Windows: the shell's URL handler; elsewhere: the webbrowser module."""
+    try:
+        if sys.platform == "darwin" and os.path.exists("/usr/bin/open"):
+            return subprocess.run(["/usr/bin/open", url], check=False, timeout=30).returncode == 0
+        if os.name == "nt":
+            os.startfile(url)  # type: ignore[attr-defined]
+            return True
+        return bool(webbrowser.open(url))
+    except (OSError, subprocess.SubprocessError):
+        return bool(webbrowser.open(url))
+
+
 class _CallbackServer(ThreadingHTTPServer):
     allow_reuse_address = False
 
@@ -298,8 +314,15 @@ class ObserverAuthorizationClient:
         authorize_url = f"{self.origin}/authorize?{urllib.parse.urlencode(params)}"
         try:
             if self.open_browser:
-                if not webbrowser.open(authorize_url):
-                    raise ObserverAuthError("the system browser could not be opened")
+                opened = _open_system_browser(authorize_url)
+                # Shown in the install window; also the fallback when no browser came up.
+                minutes = max(1, int(self.timeout_seconds // 60))
+                print(
+                    ("已在浏览器打开飞书登录页，请在 %d 分钟内完成登录。" if opened else "浏览器没有自动打开，请把下面的地址复制到浏览器，在 %d 分钟内完成飞书登录：") % minutes,
+                    file=sys.stderr,
+                    flush=True,
+                )
+                print(authorize_url, file=sys.stderr, flush=True)
             else:
                 print(authorize_url, flush=True)
             if not callback.ready.wait(self.timeout_seconds):

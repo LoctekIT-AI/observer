@@ -126,7 +126,7 @@ if ($Mode -eq 'install') {
         } elseif ($Authorize) {
             $authArgs = @((Join-Path $PSScriptRoot 'observer_authorize.py'),'--client-type',$HostId,'--config-file',$ConfigFile,'--auth-origin',$AuthOrigin)
             if ($ReplaceConfig) { $authArgs += '--replace' }
-            Invoke-ObserverNative $observerPython $authArgs 360 | Out-Null
+            Invoke-ObserverNative $observerPython $authArgs 660 | Out-Null
         }
     } finally {
         # .NET delete instead of Remove-Item: some AI clients (e.g. WorkBuddy) replace Remove-Item in

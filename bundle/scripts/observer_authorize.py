@@ -33,7 +33,7 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--config-file", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--auth-origin", default=DEFAULT_ORIGIN)
     parser.add_argument("--installation-id")
-    parser.add_argument("--timeout-seconds", type=float, default=300.0)
+    parser.add_argument("--timeout-seconds", type=float, default=600.0)
     parser.add_argument("--no-browser", action="store_true", help="print the authorization URL for a separately controlled browser")
     parser.add_argument("--replace", action="store_true", help="replace an existing Observer authorization and rotate its protected token")
     return parser
