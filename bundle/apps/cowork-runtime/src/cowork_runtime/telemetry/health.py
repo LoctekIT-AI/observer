@@ -23,7 +23,9 @@ from typing import Any, Callable
 
 BUNDLE_ROOT = Path(__file__).resolve().parents[5]
 DEFAULT_INTERVAL_SECONDS = 3600
-_COUNTERS = ("events", "terminal_enqueued", "files", "sessions", "skipped_records", "unrecognized_calls", "replayed_sources")
+_COUNTERS = ("events", "terminal_enqueued", "files", "sessions", "skipped_records", "unrecognized_calls", "replayed_sources",
+             # coverage self-check: raw Skill/MCP-looking records vs. reported Skill/MCP calls (cumulative)
+             "skill_signals", "skill_reported", "mcp_signals", "mcp_reported")
 
 
 def bundle_version() -> str:
@@ -56,7 +58,24 @@ def _nanos(value: datetime) -> int:
     return int(value.timestamp()) * 1_000_000_000 + value.microsecond * 1_000
 
 
-def health_payload(runtime: str, status: dict[str, Any], *, now: datetime, totals: dict[str, int]) -> tuple[dict[str, Any], str, str]:
+def coverage_gaps(totals: dict[str, int], previous: dict[str, int] | None) -> list[str]:
+    """Kinds whose raw-looking records since the previous health record were mostly not reported.
+
+    A collector that silently stops recognising a client's calls (a format
+    change the parsers read as something else) shows up here without anyone
+    having to inspect the uploaded records.
+    """
+    gaps = []
+    for kind in ("skill", "mcp"):
+        signals = int(totals.get(f"{kind}_signals", 0)) - int((previous or {}).get(f"{kind}_signals", 0))
+        reported = int(totals.get(f"{kind}_reported", 0)) - int((previous or {}).get(f"{kind}_reported", 0))
+        if signals >= 3 and reported * 2 < signals:
+            gaps.append(f"coverage_gap:{kind}")
+    return gaps
+
+
+def health_payload(runtime: str, status: dict[str, Any], *, now: datetime, totals: dict[str, int],
+                   previous_totals: dict[str, int] | None = None) -> tuple[dict[str, Any], str, str]:
     """OTLP/JSON body for one health record (metadata only)."""
     installation = os.environ.get("OBSERVER_INSTALLATION_ID", "") or platform.node()
     trace_id = uuid.uuid5(uuid.NAMESPACE_DNS, f"aihub-skill-mcp:observer-health:{installation}:{runtime}").hex
@@ -65,6 +84,7 @@ def health_payload(runtime: str, status: dict[str, Any], *, now: datetime, total
     codes = sorted({f"{item.get('code', 'error')}:{item.get('error_type', '')}".rstrip(":") for item in errors if isinstance(item, dict)})
     if status.get("error_type") and not codes:
         codes = [f"error:{status['error_type']}"]
+    gaps = coverage_gaps(totals, previous_totals)
     outbox = status.get("outbox") if isinstance(status.get("outbox"), dict) else {}
     values: list[tuple[str, object]] = [
         ("observer.health.runtime", runtime),
@@ -74,6 +94,7 @@ def health_payload(runtime: str, status: dict[str, Any], *, now: datetime, total
         ("observer.health.os_release", platform.release()),
         ("observer.health.python", platform.python_version()),
         ("observer.health.error_codes", ",".join(codes) or None),
+        ("observer.health.coverage_gaps", ",".join(gaps) or None),
         ("observer.health.outbox_pending", int(outbox.get("pending", 0))),
         ("observer.health.outbox_delivered", int(outbox.get("delivered", 0))),
         ("observer.health.outbox_failed", int(outbox.get("failed", 0))),
@@ -155,6 +176,7 @@ class HealthReporter:
                 if isinstance(value, int):
                     totals[name] = value  # current values, not sums
             state["totals"] = totals
+            previous_totals = state.get("sent_totals") if isinstance(state.get("sent_totals"), dict) else None
             last_sent = state.get("last_sent_at")
             version = bundle_version()
             due = (
@@ -165,12 +187,14 @@ class HealthReporter:
             )
             sent = False
             if due and self.enabled:
-                body, trace_id, span_id = health_payload(self.runtime, status, now=current, totals=totals)
+                body, trace_id, span_id = health_payload(self.runtime, status, now=current, totals=totals,
+                                                         previous_totals=previous_totals)
                 try:
                     (self._send or _default_send)(body, trace_id, span_id)
                     state["last_sent_at"] = current.isoformat()
                     state["last_status"] = status.get("status")
                     state["last_version"] = version
+                    state["sent_totals"] = dict(totals)
                     state.pop("last_send_error", None)
                     sent = True
                 except Exception as exc:  # health must never break collection

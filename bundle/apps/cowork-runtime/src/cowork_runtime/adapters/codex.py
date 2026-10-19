@@ -22,43 +22,6 @@ from .registry import CodexCursor, PluginRegistry
 # - additional_tools：新会话开头声明的可用工具清单（只有工具名和说明，不是调用）。
 _CODEX_NON_INVOCATION_TOOL_RECORDS = frozenset({"tool_search_call", "tool_search_output", "additional_tools"})
 
-# Codex 代码模式（code mode）：所有工具调用都包在内置工具 ``exec`` 里，模型写一段
-# JS，在里面调用 ``tools.exec_command({cmd: ...})``、``tools.mcp__<server>__<tool>(...)``。
-_CODEX_CODE_MODE_TOOL = "exec"
-_JS_STRING = r'"(?:[^"\\\n]|\\.)*"|\'(?:[^\'\\\n]|\\.)*\'|`(?:[^`\\]|\\.)*`'
-_EXEC_CMD_ARGUMENT = re.compile(r'(?:\bcmd|"cmd"|\'cmd\')\s*:\s*(' + _JS_STRING + r")")
-_EXEC_MCP_CALL = re.compile(
-    r'\btools\s*(?:\.\s*(mcp__[A-Za-z0-9_\-]+)|\[\s*["\'](mcp__[A-Za-z0-9_\-]+)["\']\s*\])\s*\('
-)
-
-
-def _js_string_value(literal: str) -> str | None:
-    """Decode one JS string literal (no template interpolation)."""
-    quote, body = literal[0], literal[1:-1]
-    if quote == "`" and "${" in body:
-        return None
-    if quote == '"':
-        try:
-            return json.loads(literal)
-        except json.JSONDecodeError:
-            return None
-    return re.sub(r"\\(.)", r"\1", body)
-
-
-def _code_mode_commands(source: str) -> tuple[str, ...]:
-    """Shell commands a code-mode ``exec`` passes to ``tools.exec_command``."""
-    commands: list[str] = []
-    for match in _EXEC_CMD_ARGUMENT.finditer(source):
-        value = _js_string_value(match.group(1))
-        if value:
-            commands.append(value)
-    return tuple(commands)
-
-
-def _code_mode_mcp_tools(source: str) -> tuple[str, ...]:
-    """MCP tools a code-mode ``exec`` calls, in call order (repeats kept)."""
-    return tuple(match.group(1) or match.group(2) for match in _EXEC_MCP_CALL.finditer(source))
-
 
 class CodexParseError(ValueError):
     """A rollout file cannot be safely parsed or resumed."""
@@ -82,6 +45,35 @@ class CodexReadResult:
     events: tuple[ComponentEventV1, ...]
     next_cursor: CodexCursor
     diagnostics: tuple[CodexDiagnostic, ...]
+    # Coverage self-check: raw records that look like a Skill read / an MCP call,
+    # counted independently of the parsers above (see _coverage_signal).
+    # Each entry is (kind, record time) with kind "skill" or "mcp".
+    signals: tuple[tuple[str, datetime], ...] = ()
+
+
+def _coverage_signal(record: dict[str, Any]) -> tuple[str, ...]:
+    """Kinds ("skill", "mcp") a raw record looks like, judged without the event parsers.
+
+    Deliberately simple and format-agnostic, so a client format change that
+    makes the real parsers miss calls shows up as signals without events.
+    Only call records are looked at (never outputs or tool lists).
+    """
+    payload = record.get("payload") if isinstance(record.get("payload"), dict) else None
+    if record.get("type") != "response_item" or payload is None:
+        return ()
+    kind = payload.get("type")
+    if kind not in {"custom_tool_call", "function_call", "mcp_tool_call"}:
+        return ()
+    if kind == "mcp_tool_call" or str(payload.get("namespace") or "").startswith("mcp__") or str(payload.get("name") or "").startswith("mcp__"):
+        return ("mcp",)
+    body = payload.get("input") if kind == "custom_tool_call" else payload.get("arguments")
+    text = body if isinstance(body, str) else json.dumps(body, ensure_ascii=False, default=str) if body is not None else ""
+    kinds: list[str] = []
+    if "SKILL.md" in text and "skills" in text:
+        kinds.append("skill")
+    if "tools.mcp__" in text:
+        kinds.append("mcp")
+    return tuple(kinds)
 
 
 def _utc_now() -> datetime:
@@ -400,6 +392,7 @@ class CodexIncrementalAdapter:
 
         events: list[ComponentEventV1] = []
         diagnostics: list[CodexDiagnostic] = []
+        signals: list[tuple[str, datetime]] = []
         seen_keys: set[str] = set()
         started_at_by_call: dict[str, datetime] = {}
         name_by_call: dict[str, str] = {}
@@ -446,6 +439,13 @@ class CodexIncrementalAdapter:
                     continue
                 if not isinstance(record, dict):
                     continue
+                signal_kinds = _coverage_signal(record)
+                if signal_kinds:
+                    try:
+                        signal_at = _record_timestamp(record, fallback=current_time)
+                    except ValueError:
+                        signal_at = current_time
+                    signals.extend((kind, signal_at) for kind in signal_kinds)
                 try:
                     _reject_unknown_tool_record(record, path=str(source_path), offset=line_offset)
                     if record.get("type") == "thread.started":
@@ -493,15 +493,6 @@ class CodexIncrementalAdapter:
                         binding=binding,
                         seen_keys=seen_keys,
                         skills_by_turn=app_server_skills_by_turn,
-                    )
-                    code_mode_mcp_events = self._code_mode_mcp_events_from_record(
-                        record,
-                        installation_id=installation_id,
-                        session_id=session_id,
-                        run_id=run_id or session_id,
-                        current_time=current_time,
-                        binding=binding,
-                        seen_keys=seen_keys,
                     )
                     app_server_mcp_events = self._app_server_mcp_events_from_record(
                         record,
@@ -553,7 +544,6 @@ class CodexIncrementalAdapter:
                 )
                 events.extend(skill_events)
                 events.extend(app_server_skill_events)
-                events.extend(code_mode_mcp_events)
                 events.extend(app_server_mcp_events)
                 if event is not None:
                     events.append(event)
@@ -581,7 +571,8 @@ class CodexIncrementalAdapter:
         )
         if persist_cursor:
             self.registry.save_cursor(next_cursor)
-        return CodexReadResult(events=tuple(events), next_cursor=next_cursor, diagnostics=tuple(diagnostics))
+        return CodexReadResult(events=tuple(events), next_cursor=next_cursor, diagnostics=tuple(diagnostics),
+                               signals=tuple(signals))
 
     @staticmethod
     def _rebuild_context(
@@ -826,7 +817,7 @@ class CodexIncrementalAdapter:
             events: list[ComponentEventV1] = []
             for index, name in enumerate(_skill_names_read_by_command(command[-1])):
                 invocation_id = f"{call_id}:skill-observation:{index}"
-                event_id = _stable_event_id(installation_id, session_id, invocation_id, "started")
+                event_id = _stable_event_id(installation_id, session_id, invocation_id, "completed")
                 if event_id in seen_keys:
                     continue
                 seen_keys.add(event_id)
@@ -840,9 +831,10 @@ class CodexIncrementalAdapter:
                         plugin_id="codex-adapter",
                         component_kind="skill",
                         component_id=name,
-                        stage="started",
+                        stage="completed",
                         occurred_at=occurred_at,
                         started_at=occurred_at,
+                        ended_at=occurred_at,
                         observation_kind="skill_file_read",
                         evidence_source="codex_command_execution",
                         evidence_level="inferred",
@@ -1060,79 +1052,6 @@ class CodexIncrementalAdapter:
             source_type="rollout_jsonl",
         ),)
 
-    def _code_mode_mcp_events_from_record(
-        self,
-        record: dict[str, Any],
-        *,
-        installation_id: str,
-        session_id: str,
-        run_id: str,
-        current_time: datetime,
-        binding: Any,
-        seen_keys: set[str],
-    ) -> tuple[ComponentEventV1, ...]:
-        """MCP tools called from inside a code-mode ``exec`` block.
-
-        Codex writes one ``custom_tool_call`` named ``exec`` whose ``input`` is
-        the JS the model ran; each ``tools.mcp__<server>__<tool>(...)`` in it is
-        one MCP call. The per-call result is only in the output body (content,
-        never read here), so the stage follows the ``exec`` record's own status
-        and the evidence is marked ``inferred``.
-        """
-
-        if record.get("type") != "response_item":
-            return ()
-        payload = record.get("payload")
-        if (
-            not isinstance(payload, dict)
-            or payload.get("type") != "custom_tool_call"
-            or payload.get("name") != _CODEX_CODE_MODE_TOOL
-            or not isinstance(payload.get("input"), str)
-        ):
-            return ()
-        source_session = payload.get("session_id")
-        if source_session is not None and source_session != session_id:
-            return ()
-        tools = _code_mode_mcp_tools(payload["input"])
-        if not tools:
-            return ()
-        call_id = _required_string(payload, "call_id")
-        occurred_at = _parse_datetime(payload.get("occurred_at"), default=_record_timestamp(record, fallback=current_time))
-        status = _optional_string(payload, "status")
-        terminal_stage = _terminal_stage(status) if status is not None else "completed"
-        events: list[ComponentEventV1] = []
-        for index, component_id in enumerate(tools):
-            invocation_id = f"{call_id}:mcp:{index}"
-            for stage in ("started", terminal_stage):
-                event_id = _stable_event_id(installation_id, session_id, invocation_id, stage)
-                if event_id in seen_keys:
-                    continue
-                seen_keys.add(event_id)
-                events.append(ComponentEventV1(
-                    schema_version="component_event.v1",
-                    event_id=event_id,
-                    invocation_id=invocation_id,
-                    run_id=run_id,
-                    runtime="codex",
-                    plugin_id="codex-adapter",
-                    component_kind="mcp_tool",
-                    component_id=component_id,
-                    stage=stage,
-                    occurred_at=occurred_at,
-                    started_at=occurred_at,
-                    ended_at=occurred_at if stage != "started" else None,
-                    error_code="tool_error" if stage == "failed" else None,
-                    observation_kind="mcp_call",
-                    evidence_source="codex_code_mode",
-                    evidence_level="inferred",
-                    parent_invocation_id=call_id,
-                    installation_id=installation_id,
-                    tenant_id=binding.tenant_id if binding is not None else None,
-                    user_id=binding.user_id if binding is not None else None,
-                    source_type="rollout_jsonl",
-                ))
-        return tuple(events)
-
     def _app_server_skill_event(
         self,
         *,
@@ -1225,20 +1144,6 @@ class CodexIncrementalAdapter:
                 if isinstance(command, str):
                     for name in _skill_names_read_by_command(command):
                         observations.append((name, "skill_file_read", "codex_tool_arguments", "inferred"))
-        elif (
-            record_type == "response_item"
-            and payload.get("type") == "custom_tool_call"
-            and payload.get("name") == _CODEX_CODE_MODE_TOOL
-            and isinstance(payload.get("input"), str)
-        ):
-            # 代码模式：Skill 通过 exec 里的 tools.exec_command({cmd:"cat …/SKILL.md"}) 读取。
-            seen_names: list[str] = []
-            for command in _code_mode_commands(payload["input"]):
-                for name in _skill_names_read_by_command(command):
-                    if name not in seen_names:
-                        seen_names.append(name)
-            for name in seen_names:
-                observations.append((name, "skill_file_read", "codex_code_mode", "inferred"))
         elif record_type == "response_item" and payload.get("type") == "message" and payload.get("role") != "user":
             return ()
 
@@ -1249,7 +1154,7 @@ class CodexIncrementalAdapter:
                 invocation_id = f"{source_call_id}:skill-observation:{index}"
             else:
                 invocation_id = _skill_selection_id(session_id, name, occurred_at, index)
-            event_id = _stable_event_id(installation_id, session_id, invocation_id, "started")
+            event_id = _stable_event_id(installation_id, session_id, invocation_id, "completed")
             if event_id in seen_keys:
                 continue
             seen_keys.add(event_id)
@@ -1263,9 +1168,10 @@ class CodexIncrementalAdapter:
                     plugin_id="codex-adapter",
                     component_kind="skill",
                     component_id=name,
-                    stage="started",
+                    stage="completed",
                     occurred_at=occurred_at,
                     started_at=occurred_at,
+                    ended_at=occurred_at,
                     observation_kind=observation_kind,
                     evidence_source=evidence_source,
                     evidence_level=evidence_level,

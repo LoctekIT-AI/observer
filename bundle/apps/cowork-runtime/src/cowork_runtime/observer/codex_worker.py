@@ -99,6 +99,10 @@ def _complete_offset(path: Path) -> int:
     return 0
 
 
+# One-time re-read after v0.2.37 so Codex Skill reads missed by older versions are uploaded.
+SKILL_BACKFILL_MARKER = "skill-backfill-v1.json"
+
+
 class CodexObserverWorker:
     """Read new rollout facts, persist metadata, then advance durable cursors."""
 
@@ -113,6 +117,7 @@ class CodexObserverWorker:
         self.flush_enabled = flush
         self.health = HealthReporter(self.state_dir, "codex", enabled=flush)
         self._unrecognized = 0
+        self._coverage = dict.fromkeys(("skill_signals", "skill_reported", "mcp_signals", "mcp_reported"), 0)
         self.replay = ReplayLedger(self.state_dir)
         self._replay_checked = False
         self._replayed = 0
@@ -190,6 +195,8 @@ class CodexObserverWorker:
                              "offset": _complete_offset(path)} for path in files],
             }
             _atomic_json(marker, installation)
+            # A fresh installation has nothing from older versions to backfill.
+            _atomic_json(self.state_dir / SKILL_BACKFILL_MARKER, {"done_at": installation["created_at"], "rewound": 0})
         initialized = 0
         for source in installation["sources"]:
             if self.registry.cursor(INSTALLATION_ID, source["path"]) is None:
@@ -213,6 +220,31 @@ class CodexObserverWorker:
         self._replayed += rewound
         self._guarded |= guarded
 
+    def _skill_backfill(self, files: list[Path]) -> None:
+        """Once: re-read every rollout since installation so Skill reads are uploaded.
+
+        Before v0.2.37 Codex Skill observations were emitted only as ``started``
+        and never reached the upload outbox. Re-reading from the start of each
+        file uploads them; reads are guarded by the installation time (nothing
+        from before installation is reported) and event IDs are stable, so
+        already-uploaded MCP calls are not uploaded twice.
+        """
+        marker = self.state_dir / SKILL_BACKFILL_MARKER
+        if marker.exists():
+            return
+        rewound = 0
+        for source in files:
+            cursor = self.registry.cursor(INSTALLATION_ID, str(source))
+            if cursor is None or cursor.offset == 0:
+                continue
+            self.registry.save_cursor(CodexCursor(
+                installation_id=INSTALLATION_ID, source_path=cursor.source_path,
+                file_identity=cursor.file_identity, offset=0, updated_at=datetime.now(timezone.utc)))
+            self._guarded.add(str(source))
+            rewound += 1
+        self._replayed += rewound
+        _atomic_json(marker, {"done_at": datetime.now(timezone.utc).isoformat(), "rewound": rewound})
+
     def _process(self, source: Path) -> tuple[int, int]:
         cursor = self.registry.cursor(INSTALLATION_ID, str(source))
         identity = _file_identity(source)
@@ -231,6 +263,15 @@ class CodexObserverWorker:
             event for event in result.events
             if (event.component_kind in {"skill", "mcp_tool"} or is_degraded(event)) and (installed_at is None or event.occurred_at >= installed_at)
         ]
+        # Coverage self-check (see adapters.codex._coverage_signal), same installation guard as events.
+        for kind, signal_at in result.signals:
+            if installed_at is None or signal_at >= installed_at:
+                self._coverage[f"{kind}_signals"] += 1
+        for event in events:
+            if event.stage != "started" and event.component_kind == "skill":
+                self._coverage["skill_reported"] += 1
+            elif event.stage != "started" and event.component_kind == "mcp_tool":
+                self._coverage["mcp_reported"] += 1
         degraded = sum(1 for event in events if is_degraded(event) and event.stage != "started")
         self._unrecognized += degraded
         if degraded:
@@ -270,6 +311,7 @@ class CodexObserverWorker:
             files = self._files()
             initialized = self._initialize_high_water(files)
             self._apply_replay()
+            self._skill_backfill(files)
         except (OSError, ValueError, RuntimeError) as exc:
             errors.append(self._error("source_unavailable", self.source_root, exc))
         if not errors:
@@ -293,7 +335,8 @@ class CodexObserverWorker:
             "errors": errors, "outbox": self.outbox.count_by_status(),
         }
         _atomic_json(self.state_dir / "status.json", status)
-        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed)
+        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed, **self._coverage)
+        self._coverage = dict.fromkeys(self._coverage, 0)
         self._unrecognized = 0
         self._replayed = 0
         return run

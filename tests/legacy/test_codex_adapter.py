@@ -294,7 +294,7 @@ def test_codex_adapter_records_structured_skill_selection_as_partial_observation
     event = result.events[0]
     assert event.component_kind == "skill"
     assert event.component_id == "openai-docs"
-    assert event.stage == "started"
+    assert event.stage == "completed"
     assert event.observation_kind == "skill_selected"
     assert event.evidence_source == "codex_skill_user_input"
     assert event.evidence_level == "partial"
@@ -453,7 +453,7 @@ def test_codex_adapter_records_structured_skill_file_read_as_inferred_observatio
     event = result.events[0]
     assert event.component_kind == "skill"
     assert event.component_id == "systematic-debugging"
-    assert event.stage == "started"
+    assert event.stage == "completed"
     assert event.observation_kind == "skill_file_read"
     assert event.evidence_source == "codex_tool_arguments"
     assert event.evidence_level == "inferred"
@@ -607,7 +607,7 @@ def test_codex_adapter_infers_skill_read_from_item_completed_command_execution(t
     result = adapter.read(path, installation_id="install-codex-1", session_id="session-1")
 
     assert [(e.component_id, e.stage, e.evidence_level) for e in result.events] == [
-        ("openai-docs", "started", "inferred"),
+        ("openai-docs", "completed", "inferred"),
     ]
     event = result.events[0]
     assert event.observation_kind == "skill_file_read"

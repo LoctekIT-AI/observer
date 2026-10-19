@@ -21,8 +21,8 @@ def test_install_high_water_skips_history_and_collects_appended_real_records(tmp
     second = worker.run_once()
     assert not second.errors
     assert second.events == 3
-    assert second.terminal_enqueued == 1
-    assert worker.outbox.count_by_status() == {'pending': 1}
+    assert second.terminal_enqueued == 2  # Skill read + MCP terminal (v0.2.37: Skill is uploaded)
+    assert worker.outbox.count_by_status() == {'pending': 2}
     assert worker.run_once().events == 0
     worker.close()
 
@@ -39,9 +39,9 @@ def test_real_tool_result_is_absent_from_ledger_and_outbox(tmp_path) -> None:
     assert all(row['tool_result'] is None and row['user_input'] is None and row['model_output'] is None for row in rows)
     from datetime import datetime, timezone
     queued = worker.outbox.claim(owner_id='privacy-check', now=datetime.now(timezone.utc))
-    assert len(queued) == 1
-    assert queued[0].event.tool_result is None
-    assert 'desktop_package_json_name' not in queued[0].event.model_dump_json()
+    assert sorted(item.event.component_kind for item in queued) == ['mcp_tool', 'skill']
+    assert all(item.event.tool_result is None for item in queued)
+    assert all('desktop_package_json_name' not in item.event.model_dump_json() for item in queued)
     assert 'desktop_package_json_name' not in json.dumps(rows)
     worker.close()
 
@@ -72,7 +72,7 @@ def test_new_rollout_after_install_is_read_from_start_after_restart(tmp_path) ->
     report = worker.run_once()
     assert not report.errors
     assert report.events == 3
-    assert worker.outbox.count_by_status() == {'pending': 1}
+    assert worker.outbox.count_by_status() == {'pending': 2}
     assert worker.run_once().events == 0
     worker.close()
 
@@ -88,7 +88,7 @@ def test_replaced_source_does_not_duplicate_terminal_event(tmp_path) -> None:
     replacement.write_bytes(FIXTURE.read_bytes())
     replacement.replace(source)
     assert not worker.run_once().errors
-    assert worker.outbox.count_by_status() == {'pending': 1}
+    assert worker.outbox.count_by_status() == {'pending': 2}
     assert len(worker.store.list_events(SESSION)) == 3
     worker.close()
 
@@ -106,7 +106,7 @@ def test_partial_record_is_diagnosed_without_cursor_loss_then_resumes(tmp_path) 
     with source.open('ab') as stream:
         stream.write(data[-5:])
     assert not worker.run_once().errors
-    assert worker.outbox.count_by_status() == {'pending': 1}
+    assert worker.outbox.count_by_status() == {'pending': 2}
     worker.close()
 
 
