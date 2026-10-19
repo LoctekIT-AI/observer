@@ -30,3 +30,24 @@ def test_source_errors_still_block(tmp_path):
     assert agent._worker_status(args, {"pid": 42})[1] == "worker status is not ok"
     args = _status(tmp_path, status="failed", errors=[])
     assert agent._worker_status(args, {"pid": 42})[1] == "worker status is not ok"
+
+
+def test_result_stamped_before_call_is_uploaded_not_rejected_forever():
+    """The stuck Claude record on the dev Mac (10-19): result time 1 s before the call time."""
+    from datetime import timedelta
+
+    from cowork_contracts import ComponentEventV1
+    from cowork_runtime.telemetry.langfuse import _payload
+
+    ended = datetime(2026, 10, 19, 5, 37, 36, tzinfo=timezone.utc)
+    event = ComponentEventV1(
+        schema_version="component_event.v1", event_id="claude-desktop:x", invocation_id="cblk_x", run_id="run-1",
+        runtime="claude", plugin_id="claude-desktop-adapter", component_kind="mcp_tool",
+        component_id="mcp__remote-devices__device_request_folder_access", stage="completed",
+        occurred_at=ended, started_at=ended + timedelta(seconds=1), ended_at=ended,
+        observation_kind="mcp_call", evidence_source="claude_desktop_indexeddb", evidence_level="verified",
+        installation_id="install-claude-desktop-1", source_type="indexeddb_leveldb",
+    )
+    body, _, _ = _payload(event)
+    span = body["resourceSpans"][0]["scopeSpans"][0]["spans"][0]
+    assert span["startTimeUnixNano"] == span["endTimeUnixNano"]

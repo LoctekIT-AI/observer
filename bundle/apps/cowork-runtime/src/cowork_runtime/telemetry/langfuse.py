@@ -188,7 +188,11 @@ def _payload(event: ComponentEventV1) -> tuple[dict[str, Any], str, str]:
     start_ns = _unix_nanos(started_at)
     end_ns = _unix_nanos(ended_at)
     if end_ns < start_ns:
-        raise LangfuseExportError("Langfuse span end timestamp precedes start timestamp")
+        # A client can stamp the result before the call (e.g. Claude Desktop
+        # stamps blocks in the cloud while a local approval prompt waits).
+        # The terminal time is the fact being reported: start the span there
+        # instead of rejecting the record forever and blocking the outbox.
+        start_ns = end_ns
 
     trace_id = _uuid_hex(event.run_id)
     span_id = _uuid_hex(event.invocation_id)[:16]
