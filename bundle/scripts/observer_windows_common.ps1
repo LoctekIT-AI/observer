@@ -171,7 +171,13 @@ function Assert-ObserverHeartbeat([string]$TaskName, [string]$StateDirectory, [d
             $heartbeat = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json
             $checked = [datetimeoffset]::Parse($heartbeat.checked_at)
             if ($checked -ge $Since) {
-                if ($heartbeat.status -ne 'ok') { throw "Selected worker heartbeat reports failure: $statusPath" }
+                if ($heartbeat.status -ne 'ok') {
+                    # Upload-only failures (network, one rejected pending record) are retried from
+                    # the outbox and do not depend on the installed version: they must not block.
+                    $errorCodes = @($heartbeat.errors | ForEach-Object { $_.code })
+                    $onlyDelivery = ($errorCodes.Count -gt 0) -and (@($errorCodes | Where-Object { $_ -ne 'delivery_failed' }).Count -eq 0)
+                    if (-not $onlyDelivery) { throw "Selected worker heartbeat reports failure: $statusPath" }
+                }
                 if ($task.State -eq 'Running') {
                     $workerId = [uint32]$heartbeat.pid
                     if ($workerId -eq 0) { throw 'Selected heartbeat has an invalid process ID' }

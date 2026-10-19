@@ -214,6 +214,21 @@ def _wait_for_removal() -> dict[str, Any]:
         time.sleep(min(0.25, remaining))
 
 
+def _only_delivery_failed(status: dict[str, Any]) -> bool:
+    """True when the worker reads its source fine and only the upload failed.
+
+    Upload failures (network, the receiver rejecting one pending record) are
+    retried by the worker from its outbox and do not depend on the installed
+    version, so they must not block an update or roll it back.
+    """
+    errors = status.get("errors")
+    return (
+        isinstance(errors, list)
+        and bool(errors)
+        and all(isinstance(item, dict) and item.get("code") == "delivery_failed" for item in errors)
+    )
+
+
 def _worker_status(args: argparse.Namespace, registration: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
     path = _absolute(args.state_dir) / "status.json"
     try:
@@ -228,7 +243,7 @@ def _worker_status(args: argparse.Namespace, registration: dict[str, Any]) -> tu
         launch_pid = status["launch_pid"] if "launch_pid" in status else status.get("pid")
         if launch_pid != registration.get("pid"):
             return status, "worker status PID does not match LaunchAgent PID"
-        if status.get("status") != "ok":
+        if status.get("status") != "ok" and not _only_delivery_failed(status):
             return status, "worker status is not ok"
         checked_at = status.get("checked_at")
         if not isinstance(checked_at, str):
