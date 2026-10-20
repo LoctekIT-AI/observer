@@ -56,8 +56,16 @@ observer_validate_bootstrap_layout() {
     local dsh_source="$HOME/.aihub/observer/dsh" dsh_state="$HOME/Library/Application Support/AIHub/dsh-observer"
     local dsh_profile="$HOME/Library/Application Support/dsh-desktop/harness/profiles/web" dsh_cli='/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai/dsh/lib/bin.js'
     # Same default choice as install_dsh_observer.macos_default_dsh: AI Hub when it is set up.
-    if [ -f '/Applications/AI Hub.app/Contents/Resources/runtime/cli/bin/dsh' ] && [ -f "$HOME/Library/Application Support/AI Hub/ah-home/profiles/desktop/package.json" ]; then
-        dsh_profile="$HOME/Library/Application Support/AI Hub/ah-home/profiles/desktop"; dsh_cli='/Applications/AI Hub.app/Contents/Resources/runtime/cli/bin/dsh'
+    local aihub_app candidate
+    aihub_app=''
+    while IFS= read -r candidate; do
+        case "$candidate" in /Volumes/*|'') continue ;; esac
+        if [ -f "$candidate/Contents/Resources/runtime/cli/bin/dsh" ]; then aihub_app=$candidate; break; fi
+    done < <(printf '%s\n' '/Applications/AI Hub.app' "$HOME/Applications/AI Hub.app"
+             [ -x /usr/bin/mdfind ] && /usr/bin/mdfind "kMDItemCFBundleIdentifier == 'com.deepseek.harness'" 2>/dev/null | /usr/bin/grep '\.app$' || true
+             /bin/ps -axo command= 2>/dev/null | /usr/bin/grep '/Contents/MacOS/AI Hub' | /usr/bin/grep -v 'Helper' | /usr/bin/sed 's#/Contents/MacOS/AI Hub.*##' || true)
+    if [ -n "$aihub_app" ] && [ -d "$HOME/Library/Application Support/AI Hub/ah-home/profiles/desktop" ]; then
+        dsh_profile="$HOME/Library/Application Support/AI Hub/ah-home/profiles/desktop"; dsh_cli="$aihub_app/Contents/Resources/runtime/cli/bin/dsh"
     fi
     local codex_source="$HOME/.codex/sessions" codex_state="$HOME/Library/Application Support/AIHub/observer"
     local claude_source="$HOME/Library/Application Support/Claude/IndexedDB/https_claude.ai_0.indexeddb.leveldb" claude_state="$HOME/Library/Application Support/AIHub/claude-observer"

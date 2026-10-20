@@ -44,7 +44,8 @@ $harnessCandidates = @(
 )
 foreach ($candidate in $harnessCandidates) {
     if ($dshCli) { break }
-    if (-not (Test-Path -LiteralPath (Join-Path $candidate.Profile 'package.json') -PathType Leaf)) { continue }
+    # Newer AI Hub builds create package.json only once a plugin is installed; the profile directory is what counts.
+    if (-not (Test-Path -LiteralPath $candidate.Profile -PathType Container)) { continue }
     $harnessDirs = @()
     $harnessDirs += @(Get-Process -Name $candidate.Name -ErrorAction SilentlyContinue | ForEach-Object { try { Split-Path -Parent $_.Path } catch { } })
     foreach ($key in @('HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*', 'HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*')) {
@@ -64,7 +65,7 @@ foreach ($candidate in $harnessCandidates) {
 $detected = [ordered]@{
     'codex' = (Test-Path -LiteralPath $codexSource -PathType Container)
     'claude' = (Test-Path -LiteralPath $claudeSource -PathType Container)
-    'dsh' = ((Test-Path -LiteralPath (Join-Path $dshProfile 'package.json') -PathType Leaf) -and [bool]$dshCli)
+    'dsh' = ([bool]$dshProfile -and (Test-Path -LiteralPath $dshProfile -PathType Container) -and [bool]$dshCli)
     'workbuddy-desktop' = (Test-Path -LiteralPath $workbuddySettings -PathType Leaf)
 }
 if (-not $detected['dsh'] -and ((Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.dsh\profiles') -PathType Container) -or (Test-Path -LiteralPath (Join-Path $env:APPDATA 'AI Hub\ah-home\profiles') -PathType Container))) {

@@ -35,7 +35,7 @@ foreach ($variable in @('UV_PYTHON_PREFERENCE','UV_VENV_CLEAR','PYTHONPATH','PYT
 }
 $observerPython = Join-Path $RuntimeDirectory 'venv\Scripts\python.exe'
 if ($HostId -eq 'dsh') {
-    if (-not $DshProfileDirectory -or -not $DshCli -or -not (Test-Path -LiteralPath (Join-Path $DshProfileDirectory 'package.json') -PathType Leaf) -or -not (Test-Path -LiteralPath $DshCli -PathType Leaf)) { throw 'DSH requires explicit existing native profile and dsh/lib/bin.js (or DeepSeek Harness dsh.cmd) paths' }
+    if (-not $DshProfileDirectory -or -not $DshCli -or -not (Test-Path -LiteralPath $DshProfileDirectory -PathType Container) -or -not (Test-Path -LiteralPath $DshCli -PathType Leaf)) { throw 'DSH requires explicit existing native profile and dsh/lib/bin.js (or DeepSeek Harness dsh.cmd) paths' }
 }
 function Get-ObserverArchive([string]$Url, [string]$Hash, [string]$Destination, [string]$Algorithm = 'SHA256') {
     Invoke-WebRequest -Uri $Url -OutFile $Destination -TimeoutSec 120 -UseBasicParsing

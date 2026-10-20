@@ -30,14 +30,50 @@ def is_harness_launcher(dsh_cli: Path) -> bool:
 # under Electron userData and uses the reserved "desktop" profile; the older DSH
 # Desktop layout is the fallback.
 AIHUB_APP = Path("/Applications/AI Hub.app")
+AIHUB_BUNDLE_ID = "com.deepseek.harness"
+AIHUB_LAUNCHER = "Contents/Resources/runtime/cli/bin/dsh"
 LEGACY_DSH_APP = Path("/Applications/DSH Desktop.app")
 
 
-def macos_default_dsh(home: Path | None = None, aihub_app: Path = AIHUB_APP) -> dict[str, Path]:
+def _aihub_candidates(home: Path) -> list[Path]:
+    """Where AI Hub may be installed: the standard folders, Spotlight by bundle id, a running AI Hub."""
+    candidates = [AIHUB_APP, home / "Applications/AI Hub.app"]
+    try:
+        found = subprocess.run(["/usr/bin/mdfind", f"kMDItemCFBundleIdentifier == '{AIHUB_BUNDLE_ID}'"],
+                               capture_output=True, text=True, timeout=15, check=False).stdout
+        candidates += [Path(line) for line in found.splitlines() if line.endswith(".app")]
+    except (OSError, subprocess.SubprocessError):
+        pass
+    try:
+        processes = subprocess.run(["/bin/ps", "-axo", "command="], capture_output=True, text=True, timeout=15, check=False).stdout
+        for line in processes.splitlines():
+            if "/Contents/MacOS/AI Hub" in line and "Helper" not in line:
+                candidates.append(Path(line.split("/Contents/MacOS/AI Hub", 1)[0]))
+    except (OSError, subprocess.SubprocessError):
+        pass
+    return candidates
+
+
+def find_aihub_app(home: Path | None = None) -> Path | None:
+    """The installed AI Hub.app, or None. An app run from its disk image (/Volumes) does not count:
+    its path disappears when the image is ejected, so the user must drag it into Applications first."""
     home = home or Path.home()
-    launcher = aihub_app / "Contents/Resources/runtime/cli/bin/dsh"
+    for app in _aihub_candidates(home):
+        if str(app).startswith("/Volumes/"):
+            continue
+        if (app / AIHUB_LAUNCHER).is_file():
+            return app
+    return None
+
+
+def macos_default_dsh(home: Path | None = None, aihub_app: Path | None = None) -> dict[str, Path]:
+    home = home or Path.home()
+    aihub_app = aihub_app or find_aihub_app(home) or AIHUB_APP
+    launcher = aihub_app / AIHUB_LAUNCHER
     profile = home / "Library/Application Support/AI Hub/ah-home/profiles/desktop"
-    if launcher.is_file() and (profile / "package.json").is_file():
+    # AI Hub creates profiles/desktop on its first start; package.json appears only once a
+    # plugin is installed in newer builds, so the profile directory is what counts.
+    if launcher.is_file() and profile.is_dir():
         return {"app": aihub_app, "cli": launcher, "profile": profile}
     return {"app": LEGACY_DSH_APP, "cli": LEGACY_DSH_APP / "Contents/Resources/app/node_modules/@deepseek-ai/dsh/lib/bin.js",
         "profile": home / "Library/Application Support/dsh-desktop/harness/profiles/web"}
@@ -84,7 +120,7 @@ def _already_active(profile_dir: Path, specifier: str, contents: dict[str, bytes
 
 def install(*, profile_dir: Path, dsh_cli: Path, node: Path | None, source_root: Path, package_root: Path = PACKAGE_ROOT) -> dict[str, object]:
     profile_dir = profile_dir.expanduser().resolve()
-    if profile_dir.parent.name != "profiles" or not (profile_dir / "package.json").is_file():
+    if profile_dir.parent.name != "profiles" or not profile_dir.is_dir():
         raise ValueError("--profile-dir must be an existing DSH_HOME/profiles/NAME profile")
     source_root = source_root.expanduser().resolve()
     dsh_cli = dsh_cli.expanduser().resolve(strict=True)

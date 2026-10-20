@@ -57,3 +57,30 @@ def test_dsh_built_in_tools_are_not_reported(tmp_path):
     worker.run_once()
     assert sum(worker.outbox.count_by_status().values()) == 2
     worker.close()
+
+
+def test_ai_hub_outside_applications_and_without_package_json_is_found(tmp_path, monkeypatch):
+    """v0.2.39: a colleague's AI Hub was not in /Applications; newer AI Hub builds may have no package.json yet."""
+    home = tmp_path / "home"
+    launcher = _app(home / "Downloads", "darwin")
+    app = home / "Downloads/AI Hub.app"
+    profile = home / "Library/Application Support/AI Hub/ah-home/profiles/desktop"
+    profile.mkdir(parents=True)  # opened once, no plugin installed yet: no package.json
+    monkeypatch.setattr(dsh, "_aihub_candidates", lambda _home: [Path("/Volumes/AI Hub/AI Hub.app"), dsh.AIHUB_APP, app])
+    assert dsh.find_aihub_app(home) == app
+    assert dsh.macos_default_dsh(home=home) == {"app": app, "cli": launcher, "profile": profile}
+    monkeypatch.setattr(dsh, "_aihub_candidates", lambda _home: [Path("/Volumes/AI Hub/AI Hub.app")])
+    assert dsh.find_aihub_app(home) is None  # run from the disk image: never installed from there
+
+
+def test_detect_script_finds_ai_hub_in_user_applications(tmp_path):
+    import subprocess
+    script = Path(__file__).resolve().parents[1] / "bundle/scripts/observer_detect_clients_macos.sh"
+    home = tmp_path / "home"
+    _app(home / "Applications", "darwin")
+    profile = home / "Library/Application Support/AI Hub/ah-home/profiles/desktop"
+    profile.mkdir(parents=True)
+    out = subprocess.run(["bash", str(script)], env={"HOME": str(home), "PATH": "/usr/bin:/bin"}, capture_output=True, text=True, check=True).stdout
+    line = next(item for item in out.splitlines() if item.startswith("dsh\t"))
+    assert line.split("\t")[1] == "found" and str(home / "Applications/AI Hub.app") in line
+    assert "dsh" in out.splitlines()[-1]

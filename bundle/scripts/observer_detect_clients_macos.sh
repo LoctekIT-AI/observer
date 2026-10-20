@@ -20,13 +20,28 @@ if [ ! -d "$claude_source" ]; then report claude missing "no Claude Desktop Inde
 elif [ -z "$claude_app" ]; then report claude missing "Claude Desktop data found, but the Claude app is not installed"
 else report claude found "$claude_source"; hosts+=(claude); fi
 # AI Hub (the company build of DeepSeek Harness) first, then the older DSH Desktop layout.
+# AI Hub may sit in /Applications, ~/Applications or elsewhere (Spotlight, or the running
+# AI Hub); an AI Hub run from its disk image (/Volumes) must be dragged into Applications first.
 aihub_profile="$HOME/Library/Application Support/AI Hub/ah-home/profiles/desktop"
-aihub_cli='/Applications/AI Hub.app/Contents/Resources/runtime/cli/bin/dsh'
+aihub_launcher='Contents/Resources/runtime/cli/bin/dsh'
+aihub_app='' aihub_on_image=''
+aihub_candidates() {
+    printf '%s\n' '/Applications/AI Hub.app' "$HOME/Applications/AI Hub.app"
+    [ -x /usr/bin/mdfind ] && /usr/bin/mdfind "kMDItemCFBundleIdentifier == 'com.deepseek.harness'" 2>/dev/null | /usr/bin/grep '\.app$' || true
+    /bin/ps -axo command= 2>/dev/null | /usr/bin/grep '/Contents/MacOS/AI Hub' | /usr/bin/grep -v 'Helper' | /usr/bin/sed 's#/Contents/MacOS/AI Hub.*##' || true
+}
+while IFS= read -r candidate; do
+    [ -n "$candidate" ] && [ -f "$candidate/$aihub_launcher" ] || continue
+    case "$candidate" in /Volumes/*) aihub_on_image=$candidate; continue ;; esac
+    aihub_app=$candidate; break
+done < <(aihub_candidates)
+aihub_cli=${aihub_app:+$aihub_app/$aihub_launcher}
 dsh_profile="$HOME/Library/Application Support/dsh-desktop/harness/profiles/web"
 dsh_cli='/Applications/DSH Desktop.app/Contents/Resources/app/node_modules/@deepseek-ai/dsh/lib/bin.js'
-if [ -f "$aihub_profile/package.json" ] && [ -f "$aihub_cli" ]; then report dsh found "$aihub_profile (AI Hub)"; hosts+=(dsh)
+if [ -n "$aihub_app" ] && [ -d "$aihub_profile" ]; then report dsh found "$aihub_profile (AI Hub: $aihub_app)"; hosts+=(dsh)
 elif [ -f "$dsh_profile/package.json" ] && [ -f "$dsh_cli" ]; then report dsh found "$dsh_profile"; hosts+=(dsh)
-elif [ -f "$aihub_cli" ]; then report dsh missing "AI Hub is installed but has not been opened yet (no desktop profile); open AI Hub once, then install"
+elif [ -n "$aihub_app" ]; then report dsh missing "AI Hub is installed but has not been opened yet (no desktop profile); open AI Hub once, then install"
+elif [ -n "$aihub_on_image" ]; then report dsh missing "AI Hub is running from its disk image ($aihub_on_image); quit AI Hub, drag it into the Applications folder, open it once from there, then install again"
 else report dsh missing "no AI Hub or DSH Desktop profile and CLI"; fi
 workbuddy_settings="$HOME/.workbuddy/settings.json"
 workbuddy_app=''
