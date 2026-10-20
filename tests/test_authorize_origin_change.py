@@ -54,3 +54,10 @@ def test_new_site_logs_in_again_and_keeps_installation_id(tmp_path, monkeypatch,
     assert calls == [("authorize", PROD_ORIGIN)]
     assert f"OBSERVER_AUTH_ORIGIN={PROD_ORIGIN}" in config.read_text()
     assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["installation_id"] == "observer-codex-0123456789abcdef01234567"
+
+
+def test_installers_reuse_a_login_only_for_the_same_site():
+    from pathlib import Path
+    scripts = Path(__file__).resolve().parents[1] / "bundle/scripts"
+    assert 'grep -qxF "OBSERVER_AUTH_ORIGIN=${observer_auth_origin%/}"' in (scripts / "bootstrap_observer_macos.sh").read_text()
+    assert "'^OBSERVER_AUTH_ORIGIN=' + [regex]::Escape($AuthOrigin.TrimEnd('/'))" in (scripts / "install_observer_windows.ps1").read_text(encoding="utf-8-sig")
