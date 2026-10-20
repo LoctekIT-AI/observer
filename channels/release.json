@@ -1,0 +1,11 @@
+{
+  "asset": "observer-v0.3.0.zip",
+  "channel": "release",
+  "published_at": "2026-10-20T06:32:25+00:00",
+  "schema": "observer.channel.v1",
+  "sha256": "45ccff0a8045b5a85fc98ea394b96a12d75748d61a28ce19d89adb486fa330c8",
+  "signature": "a21615e1409b84cd4156e6ad12a197cab45df44b4f38340fc429c51c482c3e81609545b8bd00e0301c81b3733a533d3354a2676bf16f7e6d8b14e9a7bc97f203",
+  "size": 500643,
+  "tag": "v0.3.0",
+  "version": "0.3.0"
+}
