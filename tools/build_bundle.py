@@ -90,7 +90,13 @@ def build(version: str, *, test: bool, out_dir: Path, repo: str | None = None) -
     if not readme.startswith("# Observer\n"):
         raise SystemExit("bundle/README.md must start with '# Observer'")
     title = f"# Observer {version}（测试版）\n\n> 测试版：默认授权地址为测试机 `{TEST_ORIGIN}`（内网 http），仅用于 192.168.17.121 测试环境验收，不连接正式站。\n" if test else f"# Observer {version}\n"
-    files["README.md"] = (title + readme[len("# Observer\n"):]).encode()
+    body = readme[len("# Observer\n"):]
+    if not test:
+        test_note = "take the newest release (pre-releases included for this test build)"
+        if test_note not in body:
+            raise SystemExit("bundle/README.md: release-selection note not found")
+        body = body.replace(test_note, "take the newest full release (not a pre-release; pre-releases are test builds)")
+    files["README.md"] = (title + body).encode()
 
     if test:
         for name, data in list(files.items()):
