@@ -4,7 +4,8 @@
 # 步骤：读取签名的版本文件 → 下载安装包并校验 SHA-256 → 检测本机客户端 → 征得同意后安装（飞书登录一次）。
 set -euo pipefail
 REPO=LoctekIT-AI/observer
-CHANNEL=${OBSERVER_CHANNEL:-test}
+# 默认安装正式版（release）；测试环境验收时用 OBSERVER_CHANNEL=test。
+CHANNEL=${OBSERVER_CHANNEL:-release}
 fail() { printf '\n安装没有完成：%s\n' "$1" >&2; exit 1; }
 ask() { local answer=''; if [ "${OBSERVER_ASSUME_YES:-}" = 1 ]; then answer=Y; else read -r -p "$1" answer < /dev/tty || true; fi; printf '%s' "$answer"; }
 

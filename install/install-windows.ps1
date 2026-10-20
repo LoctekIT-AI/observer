@@ -5,7 +5,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 $Repo = 'LoctekIT-AI/observer'
-$Channel = if ($env:OBSERVER_CHANNEL) { $env:OBSERVER_CHANNEL } else { 'test' }
+# Production (release) by default; set OBSERVER_CHANNEL=test for the test environment.
+$Channel = if ($env:OBSERVER_CHANNEL) { $env:OBSERVER_CHANNEL } else { 'release' }
 $AssumeYes = $env:OBSERVER_ASSUME_YES -eq '1'
 
 function Stop-Install([string]$Message) {
