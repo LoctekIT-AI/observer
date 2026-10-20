@@ -102,7 +102,11 @@ def _authorize_or_reuse(args: argparse.Namespace, config_file: Path) -> int:
     values = _read_config(config_file)
     has_existing_auth = bool(values.get("OBSERVER_AUTH_TOKEN_REF"))
     account = "observer-token-" + hashlib.sha256(str(config_file).encode("utf-8")).hexdigest()[:32]
-    if config_file.exists() and has_existing_auth and not args.replace:
+    # An existing login is reused only for the same authorization site. Moving a computer
+    # from the test environment to production (another origin) always logs in again, so
+    # uploads never keep going to the old site with its old token.
+    same_origin = values.get("OBSERVER_AUTH_ORIGIN", "").rstrip("/") == str(args.auth_origin).rstrip("/")
+    if config_file.exists() and has_existing_auth and same_origin and not args.replace:
         scheme, service, protected_account = parse_secret_reference(values["OBSERVER_AUTH_TOKEN_REF"])
         expected_scheme = "dpapi" if os.name == "nt" else "keychain"
         if scheme != expected_scheme or service != SERVICE or protected_account != account:

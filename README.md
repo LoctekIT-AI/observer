@@ -21,7 +21,7 @@ Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平�
 
 - 安装目录：macOS 在 `~/Library/Application Support/AIHub`，Windows 在 `%LOCALAPPDATA%\Observer` 和 `%LOCALAPPDATA%\AIHub`；
 - 后台常驻一个收集程序：macOS 为 LaunchAgent，Windows 为当前用户的计划任务（无窗口）；
-- 一个自动更新任务：每 6 小时检查一次本仓库发布的新版本，只安装用公司发布密钥签名、且比当前更新的版本，沿用已有的飞书登录，不会在后台弹出登录页；
+- 一个自动更新任务：每 30 分钟（以及每次登录电脑后）检查一次本仓库发布的新版本，只安装用公司发布密钥签名、且比当前更新的版本，沿用已有的飞书登录，不会在后台弹出登录页；
 - WorkBuddy：往 `~/.workbuddy/settings.json` 写 3 个钩子（工具调用前 / 后 / 失败），其他设置不动，改之前会留回滚记录；
 - DSH：往 DSH 自己的配置目录加一个 Observer 插件；
 - Codex、Claude：只读取它们的本地记录，不改它们的配置。

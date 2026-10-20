@@ -46,7 +46,7 @@ $logon = New-ScheduledTaskTrigger -AtLogOn -User $currentUser
 $logon.Delay = 'PT10M'
 $triggers = @(
     $logon,
-    (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(15) -RepetitionInterval (New-TimeSpan -Hours 6))
+    (New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(15) -RepetitionInterval (New-TimeSpan -Minutes 30))
 )
 $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
 # Priority 5 (normal): the Task Scheduler default 7 runs the installer at low CPU and I/O priority, which made a

@@ -237,7 +237,7 @@ def test_macos_launch_agent_is_written_once_and_not_reloaded_during_an_update(tm
     assert update.register_macos(python=python, bundle=bundle, agents_dir=agents, launchctl=str(launchctl)) == "registered"
     plist = plistlib.loads((agents / f"{update.LAUNCH_AGENT_LABEL}.plist").read_bytes())
     assert plist["ProgramArguments"] == [str(python), str(bundle / "scripts" / "observer_update.py"), "run"]
-    assert plist["AbandonProcessGroup"] is True and plist["StartInterval"] == 6 * 3600
+    assert plist["AbandonProcessGroup"] is True and plist["StartInterval"] == 30 * 60
     assert update.register_macos(python=python, bundle=bundle, agents_dir=agents, launchctl=str(launchctl)) == "unchanged"
     monkeypatch.setenv(update.CHILD_ENV, "1")
     assert update.register_macos(python=tmp_path / "python2", bundle=bundle, agents_dir=agents, launchctl=str(launchctl)) == "written_reload_at_login"
