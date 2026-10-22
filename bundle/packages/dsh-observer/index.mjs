@@ -35,17 +35,32 @@ function eventBase(config, sessionId, callId, occurredAt) {
     parent_invocation_id: null, evidence_level: 'verified', source_type: 'dsh_native_metadata_jsonl',
   };
 }
+// Turns that used a Skill / MCP: the user's input and the final reply, one line per
+// finished turn, next to the event file (".ndjson" so the call reader skips it).
+const TEXT_LIMIT = 50000;
+const textOf = content => Array.isArray(content)
+  ? content.filter(block => block && block.type === 'text' && typeof block.text === 'string').map(block => block.text).join('\n').trim()
+  : '';
+const clip = text => (text.length > TEXT_LIMIT ? text.slice(0, TEXT_LIMIT) : text);
 export function apply(ctx, suppliedConfig) {
   const config = validateConfig(suppliedConfig);
   const calls = new Map();
+  const turns = new Map();
+  const turnFile = resolve(dirname(config.eventFile), 'turns.ndjson');
+  const used = (sessionId, kind, componentId) => {
+    const turn = turns.get(sessionId);
+    if (!turn) return;
+    if (kind === 'skill' && !turn.skills.includes(componentId)) turn.skills.push(componentId);
+    if (kind === 'mcp_tool' && !turn.mcp.includes(componentId)) turn.mcp.push(componentId);
+  };
   // 仅保留原生 token → 调用关联，不包裹业务执行或读取参数正文。
   ctx.on('tools/execute', (exec, next) => {
     if (exec.agent) calls.set(exec.token, { sessionId: exec.agent.session.id, callId: exec.callId });
     return next();
   });
-  const append = record => {
-    mkdirSync(dirname(config.eventFile), { recursive: true, mode: 0o700 });
-    const descriptor = openSync(config.eventFile, 'a', 0o600);
+  const append = (record, file = config.eventFile) => {
+    mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+    const descriptor = openSync(file, 'a', 0o600);
     try {
       appendFileSync(descriptor, JSON.stringify(record) + '\n', 'utf8');
       fsyncSync(descriptor);
@@ -104,6 +119,7 @@ export function apply(ctx, suppliedConfig) {
     record.evidence_source = 'dsh:tools/result';
     if (parent && parent.sessionId === sessionId) record.parent_invocation_id = stableId(config.installationId, parent.sessionId, parent.callId);
     append(record);
+    used(sessionId, kind, componentId);
   }));
   ctx.on('session/event', observe('session/event', (session, event) => {
     if (event.type !== 'user/message' || event.data.source?.kind !== 'skill-invocation' || event.data.source.form !== 'instructions') return;
@@ -113,6 +129,34 @@ export function apply(ctx, suppliedConfig) {
     record.stage = 'completed'; record.error_code = null;
     record.observation_kind = 'skill_user_invocation'; record.evidence_source = 'dsh:session/event:skill-invocation';
     append(record);
+    used(session.id, 'skill', record.component_id);
   }));
-  ctx.on('dispose', () => calls.clear());
+  ctx.on('session/event', observe('session/turn', (session, event) => {
+    const sessionId = session.id;
+    if (event.type === 'turn/start') {
+      turns.set(sessionId, { turn: event.data.turn, started: event.time, inputs: [], final: '', skills: [], mcp: [] });
+      return;
+    }
+    const turn = turns.get(sessionId);
+    if (!turn) return;
+    if (event.type === 'user/message' && event.data.source?.kind === 'user') {
+      const text = textOf(event.data.content);
+      if (text && turn.inputs.length < 20) turn.inputs.push(clip(text));
+    } else if (event.type === 'assistant/message') {
+      const text = textOf(event.data.message?.content);
+      if (text) turn.final = clip(text);
+    } else if (event.type === 'turn/end') {
+      turns.delete(sessionId);
+      if (turn.skills.length === 0 && turn.mcp.length === 0) return;
+      const kind = event.data.reason?.kind;
+      append({
+        schema_version: 'dsh_turn.v1', session_id: identifier(sessionId, 'session id'), turn_id: String(event.data.turn),
+        started_at: new Date(turn.started).toISOString(), ended_at: new Date(event.time).toISOString(),
+        user_input: turn.inputs.join('\n\n') || null, final_output: turn.final || null,
+        skills: turn.skills, mcp_tools: turn.mcp,
+        status: kind === 'completed' ? 'completed' : kind === 'aborted' || kind === 'interrupted' ? 'aborted' : 'incomplete',
+      }, turnFile);
+    }
+  }));
+  ctx.on('dispose', () => { calls.clear(); turns.clear(); });
 }

@@ -25,6 +25,9 @@ from ..telemetry.langfuse import LangfuseConfig, LangfuseExporter
 from ..telemetry.health import HealthReporter
 from .replay import ReplayLedger, apply_due
 from ..telemetry.langfuse_outbox import LangfuseContentOutbox
+from ..telemetry.turns import Turn, TurnSpool, capture_enabled, default_send
+
+TURN_FILE = "turns.ndjson"  # written by the DSH plugin next to its event file
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,50 @@ class DshObserverWorker:
         self.reader_id = "install-dsh-reader-" + hashlib.sha256(str(self.source_root).encode()).hexdigest()[:16]
         self._register(self.reader_id)
         self._stop = threading.Event()
+        # Turns that used a Skill / MCP: user input + final reply (telemetry.turns).
+        self.turn_spool = TurnSpool(self.state_dir)
+        self._turns_cursor = self.state_dir / "turns-cursor.json"
+        self._turns_reported = 0
+
+    def _read_turns(self) -> None:
+        """Queue the plugin's finished turns (one JSON line each) that were not read yet."""
+        if not capture_enabled():
+            return
+        root = self.source_root if self.source_root.is_dir() else self.source_root.parent
+        try:
+            cursors = json.loads(self._turns_cursor.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            cursors = {}
+        for path in sorted(root.rglob(TURN_FILE)):
+            identity = _identity(path)
+            known = cursors.get(str(path)) or {}
+            offset = int(known.get("offset", 0)) if known.get("identity") == identity else 0
+            if offset > path.stat().st_size:
+                offset = 0
+            with path.open("rb") as handle:
+                handle.seek(offset)
+                for raw in handle:
+                    if not raw.endswith(b"\n"):
+                        break  # being written: read it next time
+                    offset += len(raw)
+                    try:
+                        data = json.loads(raw)
+                        if data.get("schema_version") != "dsh_turn.v1":
+                            continue
+                        self.turn_spool.add(Turn(
+                            runtime="dsh", session_id=str(data["session_id"]), turn_id=str(data["turn_id"]),
+                            started_at=datetime.fromisoformat(str(data["started_at"]).replace("Z", "+00:00")),
+                            ended_at=datetime.fromisoformat(str(data["ended_at"]).replace("Z", "+00:00")),
+                            user_input=data.get("user_input"), final_output=data.get("final_output"),
+                            skills=[str(item) for item in data.get("skills") or []],
+                            mcp_tools=[str(item) for item in data.get("mcp_tools") or []],
+                            status=str(data.get("status") or "completed")))
+                    except (ValueError, KeyError, TypeError, AttributeError):
+                        continue  # a line this version cannot read is skipped
+            cursors[str(path)] = {"identity": identity, "offset": offset}
+        temporary = self._turns_cursor.with_suffix(".tmp")
+        temporary.write_text(json.dumps(cursors), encoding="utf-8")
+        os.replace(temporary, self._turns_cursor)
 
     def _register(self, installation_id: str) -> None:
         if self.store.get_adapter_plugin(PLUGIN_ID, installation_id) is None:
@@ -144,10 +191,15 @@ class DshObserverWorker:
                 self.registry.save_cursor(CodexCursor(self.reader_id, str(path), identity, next_offset, datetime.now(timezone.utc)))
                 line_start = next_offset
         terminals = sum(self.outbox.count_by_status().values()) - queued_before
+        self._read_turns()
         if self.flush_enabled:
             result = self.outbox.flush(LangfuseExporter(LangfuseConfig.from_env()).export, owner_id=f"dsh-observer-{os.getpid()}-{uuid4().hex}")
             if result.failed:
                 raise RuntimeError("Observer delivery failed; pending events retained")
+            sent, failed = self.turn_spool.flush(default_send)
+            self._turns_reported += sent
+            if failed:
+                raise RuntimeError("Observer turn delivery failed; pending turns retained")
         return DshObserverRun(len(files), events, terminals)
 
     def _run_checked(self) -> DshObserverRun:
@@ -163,10 +215,13 @@ class DshObserverWorker:
     def _status(self, status: str, **fields: object) -> None:
         payload = {
             "status": status, "runtime": "dsh", "pid": os.getpid(), "launch_pid": os.getpid(),
-            "checked_at": datetime.now(timezone.utc).isoformat(), "outbox": self.outbox.count_by_status(), **fields,
+            "checked_at": datetime.now(timezone.utc).isoformat(), "outbox": self.outbox.count_by_status(),
+            "turns_pending": self.turn_spool.pending(), **fields,
         }
         _atomic_status(self.state_dir / "status.json", payload)
-        self.health.observe(payload, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed)
+        self.health.observe(payload, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed,
+                            turns_reported=self._turns_reported)
+        self._turns_reported = 0
         self._unrecognized = 0
         self._replayed = 0
 

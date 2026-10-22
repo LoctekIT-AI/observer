@@ -159,3 +159,52 @@ def test_workbuddy_ai_turn_text_comes_from_its_own_conversation_file(tmp_path, m
     assert [(t["runtime"], t["user_input"], t["final_output"], t["skills"]) for t in turns] == [
         ("workbuddy-ai", "查一下腾讯股价", "腾讯控股现价 500 港元", ["workbuddy-finance-skill"])]
     worker.close()
+
+
+def test_dsh_plugin_writes_turns_and_worker_queues_them(tmp_path):
+    import shutil
+    import subprocess
+    from pathlib import Path
+    import pytest
+    from cowork_runtime.observer.dsh_worker import DshObserverWorker
+
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node is not installed")
+    plugin = Path(__file__).resolve().parents[1] / "bundle" / "packages" / "dsh-observer" / "index.mjs"
+    events = tmp_path / "dsh" / "component-events.jsonl"
+    script = f"""
+import {{ apply }} from {json.dumps(plugin.as_uri())};
+const handlers = {{}};
+const ctx = {{ on: (name, fn) => (handlers[name] ||= []).push(fn), logger: {{ info: m => console.error(m) }} }};
+apply(ctx, {{ eventFile: {json.dumps(str(events))}, installationId: 'install-dsh-1' }});
+const session = {{ id: 'sess-9' }};
+const fire = (name, ...args) => handlers[name].forEach(fn => fn(...args));
+const ev = (type, data, time) => fire('session/event', session, {{ type, seq: 1, time, data }});
+const t0 = Date.parse('2026-10-22T08:00:00Z');
+ev('turn/start', {{ turn: 3 }}, t0);
+ev('user/message', {{ source: {{ kind: 'user' }}, content: [{{ type: 'text', text: '帮我做海报' }}] }}, t0 + 1);
+ev('assistant/message', {{ message: {{ content: [{{ type: 'text', text: '我先加载技能' }}] }} }}, t0 + 2);
+fire('tools/execute', {{ agent: {{ session }}, token: 'k', callId: 'c1' }}, () => undefined);
+fire('tools/result', {{ agent: {{ session }}, token: 'k', callId: 'c1', name: 'skill', arguments: {{}} }}, {{ isError: false, value: {{ name: 'poster-design-studio' }} }});
+ev('assistant/message', {{ message: {{ content: [{{ type: 'text', text: '海报做好了' }}] }} }}, t0 + 3);
+ev('turn/end', {{ turn: 3, reason: {{ kind: 'completed' }} }}, t0 + 4);
+ev('turn/start', {{ turn: 4 }}, t0 + 5);
+ev('user/message', {{ source: {{ kind: 'user' }}, content: [{{ type: 'text', text: '谢谢' }}] }}, t0 + 6);
+ev('turn/end', {{ turn: 4, reason: {{ kind: 'completed' }} }}, t0 + 7);
+"""
+    runner = tmp_path / "run.mjs"
+    runner.write_text(script, encoding="utf-8")
+    result = subprocess.run([node, str(runner)], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr
+    lines = [json.loads(line) for line in (events.parent / "turns.ndjson").read_text().splitlines()]
+    assert len(lines) == 1  # the turn without a Skill / MCP is not written
+    assert (lines[0]["user_input"], lines[0]["final_output"], lines[0]["skills"], lines[0]["status"]) == (
+        "帮我做海报", "海报做好了", ["poster-design-studio"], "completed")
+    worker = DshObserverWorker(source_root=events.parent, state_dir=tmp_path / "state", flush=False)
+    worker.run_once()
+    worker.run_once()  # read once only
+    turns = _spooled(tmp_path / "state")
+    assert [(t["runtime"], t["session_id"], t["user_input"], t["skills"]) for t in turns] == [
+        ("dsh", "sess-9", "帮我做海报", ["poster-design-studio"])]
+    worker.close()
