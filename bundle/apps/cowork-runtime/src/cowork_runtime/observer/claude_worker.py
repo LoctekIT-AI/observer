@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import tempfile
 import threading
@@ -46,6 +47,10 @@ class ClaudeObserverRun:
 def _file_identity(path: Path) -> str:
     stat = path.stat()
     return f"{stat.st_dev}:{stat.st_ino}"
+
+
+# IndexedDB blob files are named by their blob number in hex (e.g. 179, 270, 163f).
+_BLOB_NAME = re.compile(r"[0-9a-f]{1,16}")
 
 
 def _atomic_json(path: Path, payload: dict) -> None:
@@ -186,7 +191,7 @@ class ClaudeDesktopObserverWorker:
         blob = self.source_root.with_name(self.source_root.name.replace(".leveldb", ".blob"))
         if self.source_root.name.endswith(".leveldb") and blob.is_dir():
             for directory, _, names in os.walk(blob, onerror=failed):
-                files.extend(Path(directory) / name for name in names if name.isdigit())
+                files.extend(Path(directory) / name for name in names if _BLOB_NAME.fullmatch(name))
         return sorted(files)
 
     def _initialize_high_water(self, files: list[Path]) -> int:
@@ -255,7 +260,7 @@ class ClaudeDesktopObserverWorker:
             skill_ids=self.skill_ids,
             persist_cursor=False,
         )
-        table = source.suffix in (".ldb", ".sst") or source.name.isdigit()  # blob files hold old calls too
+        table = source.suffix in (".ldb", ".sst") or bool(_BLOB_NAME.fullmatch(source.name))  # blob files hold old calls too
         guarded = (cursor is None and table) or str(source) in self._guarded
         installed_at = getattr(self, "_installed_at", None) if guarded else None
         events = []

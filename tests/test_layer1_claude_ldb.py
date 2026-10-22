@@ -127,7 +127,7 @@ def test_worker_reads_long_conversations_kept_in_the_blob_folder(tmp_path):
              + current_use(old, MCP, when="2026-01-01T00:00:00.000Z") + current_result(old, MCP))
     blob = tmp_path / "https_claude.ai_0.indexeddb.blob" / "1" / "02"
     blob.mkdir(parents=True)
-    (blob / "267").write_bytes(b"\xff\x11\x02" + snappy_compress(value))
+    (blob / "163f").write_bytes(b"\xff\x11\x02" + snappy_compress(value))  # blob numbers are hex
     report = worker.run_once()
     assert report.errors == ()
     assert worker.outbox.count_by_status() == {"pending": 2}  # A once (already from the log), B from the blob, old never
