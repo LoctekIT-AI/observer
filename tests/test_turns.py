@@ -208,3 +208,70 @@ ev('turn/end', {{ turn: 4, reason: {{ kind: 'completed' }} }}, t0 + 7);
     assert [(t["runtime"], t["session_id"], t["user_input"], t["skills"]) for t in turns] == [
         ("dsh", "sess-9", "帮我做海报", ["poster-design-studio"])]
     worker.close()
+
+
+def _v8(value) -> bytes:
+    """Tiny V8 serializer for the test (objects, sparse arrays, strings, ints, booleans)."""
+    def varint(n):
+        out = bytearray()
+        while True:
+            byte = n & 0x7F
+            n >>= 7
+            out.append(byte | (0x80 if n else 0))
+            if not n:
+                return bytes(out)
+    if isinstance(value, bool):
+        return b"T" if value else b"F"
+    if isinstance(value, int):
+        return b"I" + varint((value << 1) ^ (value >> 63))
+    if value is None:
+        return b"_"
+    if isinstance(value, str):
+        if all(ord(c) < 256 for c in value):
+            raw = value.encode("latin-1")
+            return b'"' + varint(len(raw)) + raw
+        raw = value.encode("utf-16-le")
+        return b"c" + varint(len(raw)) + raw
+    if isinstance(value, list):
+        body = b"".join(_v8(i) + _v8(item) for i, item in enumerate(value))
+        return b"a" + varint(len(value)) + body + b"@" + varint(len(value)) + varint(len(value))
+    if isinstance(value, dict):
+        body = b"".join(_v8(k) + _v8(v) for k, v in value.items())
+        return b"o" + body + b"{" + varint(len(value))
+    raise TypeError(value)
+
+
+def test_claude_desktop_turns_from_the_conversation_cache(tmp_path):
+    from cowork_runtime.observer.claude_worker import ClaudeDesktopObserverWorker as Worker
+
+    root = tmp_path / "https_claude.ai_0.indexeddb.leveldb"
+    root.mkdir()
+    (root / "000001.log").write_bytes(b"\x00" * 16)
+    worker = Worker(source_root=root, state_dir=tmp_path / "state", flush=False)
+    worker.run_once()  # installation; turns start being recorded from now
+    later = (datetime.now(timezone.utc) + timedelta(seconds=5)).isoformat().replace("+00:00", "Z")
+    tree = {"kind": "hub_transcript", "conversationUuid": "conv-1", "messages": [
+        {"uuid": "h1", "sender": "human", "index": 0, "created_at": later,
+         "content": [{"type": "text", "text": "请调用 observer_workspace_check 检查目录"}]},
+        {"uuid": "a1", "sender": "assistant", "index": 1, "created_at": later, "updated_at": later, "stop_reason": "end_turn",
+         "content": [{"type": "text", "text": "我来检查"},
+                     {"type": "tool_use", "id": "t1", "name": "mcp__observer-workspace__observer_workspace_check", "input": {"summary": "x"}},
+                     {"type": "tool_result", "tool_use_id": "t1", "content": [{"type": "text", "text": "{}"}]},
+                     {"type": "text", "text": "检查通过：目录里有 AGENTS.md"}]},
+        {"uuid": "h2", "sender": "human", "index": 2, "created_at": later, "content": [{"type": "text", "text": "谢谢"}]},
+        {"uuid": "a2", "sender": "assistant", "index": 3, "created_at": later, "stop_reason": "end_turn",
+         "content": [{"type": "text", "text": "不客气"}]},
+    ]}
+    value = _v8({"conversationUuid": "conv-1", "tree": tree})
+    blob = tmp_path / "https_claude.ai_0.indexeddb.blob" / "1" / "01"
+    blob.mkdir(parents=True)
+    (blob / "7").write_bytes(b"\xff\x10" + value)  # a large value kept outside LevelDB
+    worker._turn_scanned_at = None  # skip the once-a-minute wait
+    worker.run_once()
+    worker._turn_scanned_at = None
+    worker.run_once()  # each turn once
+    turns = _spooled(tmp_path / "state")
+    assert [(t["runtime"], t["session_id"], t["user_input"], t["final_output"], t["mcp_tools"]) for t in turns] == [
+        ("claude", "conv-1", "请调用 observer_workspace_check 检查目录", "检查通过：目录里有 AGENTS.md",
+         ["mcp__observer-workspace__observer_workspace_check"])]
+    worker.close()

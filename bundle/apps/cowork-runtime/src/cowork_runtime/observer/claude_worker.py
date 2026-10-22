@@ -27,6 +27,8 @@ from ..telemetry.langfuse import LangfuseConfig, LangfuseExporter
 from ..telemetry.health import HealthReporter
 from ..telemetry.langfuse_outbox import LangfuseContentOutbox
 from ..telemetry.identity import ObserverIdentity
+from ..telemetry.turns import Turn, TurnSpool, capture_enabled, default_send
+from . import claude_turns
 
 INSTALLATION_ID = "install-claude-desktop-1"
 PLUGIN_ID = "claude-desktop-adapter"
@@ -113,6 +115,11 @@ class ClaudeDesktopObserverWorker:
         self.interval_seconds = interval_seconds
         self.flush_enabled = flush
         self.health = HealthReporter(self.state_dir, "claude", enabled=flush)
+        # Turns that used a Skill / MCP: user input + final reply (telemetry.turns).
+        self.turn_spool = TurnSpool(self.state_dir)
+        self._turns_reported = 0
+        self._turn_signature: tuple | None = None
+        self._turn_scanned_at: datetime | None = None
         self._unrecognized = 0
         self.replay = ReplayLedger(self.state_dir)
         self._replay_checked = False
@@ -289,6 +296,10 @@ class ClaudeDesktopObserverWorker:
             )
             if report.failed:
                 raise RuntimeError("Observer delivery failed; pending events retained")
+            sent, failed = self.turn_spool.flush(default_send)
+            self._turns_reported += sent
+            if failed:
+                raise RuntimeError("Observer turn delivery failed; pending turns retained")
 
     @staticmethod
     def _error(code: str, path: Path, exc: Exception) -> dict[str, str]:
@@ -296,6 +307,54 @@ class ClaudeDesktopObserverWorker:
         if hasattr(exc, "offset"):
             result["offset"] = str(exc.offset)
         return result
+
+    def _turn_sources(self) -> list[Path]:
+        root = self.source_root if self.source_root.is_dir() else self.source_root.parent
+        paths = [p for p in root.iterdir() if p.suffix in (".log", ".ldb")] if root.is_dir() else []
+        blob = root.with_name(root.name.replace(".leveldb", ".blob"))
+        if blob.is_dir():
+            for directory, _, names in os.walk(blob):
+                paths.extend(Path(directory) / name for name in names)
+        return sorted(paths)
+
+    def _read_turns(self) -> None:
+        """Queue finished conversation turns that used a Skill / MCP (once each)."""
+        if not capture_enabled():
+            return
+        root = self.source_root if self.source_root.is_dir() else self.source_root.parent
+        # Reading every cached conversation takes about a second: at most once a minute, and only after a change.
+        now = datetime.now(timezone.utc)
+        if self._turn_scanned_at is not None and (now - self._turn_scanned_at).total_seconds() < 60:
+            return
+        signature = tuple((str(p), p.stat().st_size, p.stat().st_mtime_ns) for p in self._turn_sources())
+        if signature == self._turn_signature:
+            return
+        self._turn_scanned_at = now
+        # Only turns from after this version started recording turns (no history).
+        enabled_path = self.state_dir / "turns-enabled.json"
+        try:
+            enabled_at = datetime.fromisoformat(json.loads(enabled_path.read_text(encoding="utf-8"))["at"])
+        except (OSError, ValueError, KeyError):
+            enabled_at = datetime.now(timezone.utc)
+            _atomic_json(enabled_path, {"at": enabled_at.isoformat()})
+        done_path = self.state_dir / "turns-done.json"
+        try:
+            done = list(json.loads(done_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, TypeError):
+            done = []
+        seen = set(done)
+        for turn in claude_turns.collect(root):
+            key = f"{turn.conversation}:{turn.turn_id}"
+            if key in seen or turn.started_at < enabled_at:
+                continue
+            self.turn_spool.add(Turn(
+                runtime="claude", session_id=turn.conversation, turn_id=turn.turn_id,
+                started_at=turn.started_at, ended_at=turn.ended_at, user_input=turn.user_input,
+                final_output=turn.final_output, skills=turn.skills, mcp_tools=turn.mcp_tools))
+            seen.add(key)
+            done.append(key)
+        _atomic_json(done_path, done[-5000:])
+        self._turn_signature = signature
 
     def _poll(self) -> ClaudeObserverRun:
         errors: list[dict[str, str]] = []
@@ -315,6 +374,10 @@ class ClaudeDesktopObserverWorker:
                     terminal += queued
                 except (OSError, RuntimeError, ValueError) as exc:
                     errors.append(self._error("source_invalid", source, exc))
+            try:
+                self._read_turns()
+            except (OSError, RuntimeError, ValueError) as exc:
+                errors.append(self._error("turns_unreadable", self.source_root, exc))
         try:
             self._flush()
         except (OSError, RuntimeError, ValueError) as exc:
@@ -331,9 +394,12 @@ class ClaudeDesktopObserverWorker:
             "terminal_enqueued": report.terminal_enqueued,
             "errors": list(report.errors),
             "outbox": self.outbox.count_by_status(),
+            "turns_pending": self.turn_spool.pending(),
         }
         _atomic_json(self.state_dir / "status.json", status)
-        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed)
+        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed,
+                            turns_reported=self._turns_reported)
+        self._turns_reported = 0
         self._unrecognized = 0
         self._replayed = 0
         return report
