@@ -75,6 +75,8 @@ _BLOCK_WINDOW = 8192
 _LEGACY_TIMESTAMP_WINDOW = 160
 _TOOL_SEARCH_WINDOW = 65536
 
+_BLINK_SNAPPY = b"\xff\x11\x02"
+
 _LOG_BLOCK_SIZE = 32768
 _LOG_HEADER_SIZE = 7
 _LOG_FULL, _LOG_FIRST, _LOG_MIDDLE, _LOG_LAST = 1, 2, 3, 4
@@ -129,8 +131,12 @@ class _Stream:
     # File offset up to which every logical record is complete.
     complete_end: int
     framed: bool = False
+    # A compressed blob file is read as a whole: either not read yet or read completely.
+    whole: bool = False
 
     def logical_offset(self, file_offset: int) -> int:
+        if self.whole:
+            return len(self.data) if file_offset >= self.complete_end else 0
         if not self.segments:
             return min(file_offset, len(self.data))
         starts = [segment[1] for segment in self.segments]
@@ -339,6 +345,13 @@ def _leveldb_table_stream(raw: bytes) -> _Stream | None:
 
 
 def _source_stream(source: Path, raw: bytes) -> _Stream:
+    if raw[:3] == _BLINK_SNAPPY and source.suffix not in (".log", ".ldb", ".sst"):
+        # A value too large for LevelDB, kept in the IndexedDB ".blob" folder:
+        # Blink header, then the Snappy-compressed V8 value (long conversations).
+        try:
+            return _Stream(_snappy_decompress(raw[3:]), (), len(raw), whole=True)
+        except _TableFormatError:
+            return _raw_stream(raw)
     if source.suffix == ".log":
         stream = _leveldb_log_stream(raw)
         if stream is not None:

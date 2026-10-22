@@ -105,3 +105,31 @@ def test_worker_uploads_unrecognized_claude_call(tmp_path):
     [item] = worker.outbox.claim(owner_id="t", now=datetime.now(timezone.utc))
     assert (item.event.component_kind, item.event.evidence_level) == ("unknown", "inferred")
     worker.close()
+
+
+def test_worker_reads_long_conversations_kept_in_the_blob_folder(tmp_path):
+    """Long conversations live in <name>.indexeddb.blob (Blink header + Snappy); their calls were missed before v0.3.3."""
+    from cowork_runtime.observer.claude_worker import ClaudeDesktopObserverWorker
+
+    source = tmp_path / "https_claude.ai_0.indexeddb.leveldb"
+    source.mkdir()
+    log = source / "000003.log"
+    log.write_bytes(b"")
+    worker = ClaudeDesktopObserverWorker(source_root=source, state_dir=tmp_path / "state", flush=False)
+    worker.run_once()
+
+    now = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    a, b, old = ("toolu_01" + letter * 22 for letter in "ABO")
+    log.write_bytes(current_use(a, MCP, when=now) + current_result(a, MCP))
+    worker.run_once()
+    value = (b"\xff\x15" + current_use(a, MCP, when=now) + current_result(a, MCP)
+             + current_use(b, MCP, when=now) + current_result(b, MCP)
+             + current_use(old, MCP, when="2026-01-01T00:00:00.000Z") + current_result(old, MCP))
+    blob = tmp_path / "https_claude.ai_0.indexeddb.blob" / "1" / "02"
+    blob.mkdir(parents=True)
+    (blob / "267").write_bytes(b"\xff\x11\x02" + snappy_compress(value))
+    report = worker.run_once()
+    assert report.errors == ()
+    assert worker.outbox.count_by_status() == {"pending": 2}  # A once (already from the log), B from the blob, old never
+    assert worker.run_once().events == 0  # a blob is read once
+    worker.close()

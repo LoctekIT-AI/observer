@@ -182,6 +182,11 @@ class ClaudeDesktopObserverWorker:
                 for name in names
                 if name.endswith((".ldb", ".log"))
             )
+        # Long conversations are kept outside LevelDB, in the sibling ".blob" folder.
+        blob = self.source_root.with_name(self.source_root.name.replace(".leveldb", ".blob"))
+        if self.source_root.name.endswith(".leveldb") and blob.is_dir():
+            for directory, _, names in os.walk(blob, onerror=failed):
+                files.extend(Path(directory) / name for name in names if name.isdigit())
         return sorted(files)
 
     def _initialize_high_water(self, files: list[Path]) -> int:
@@ -250,7 +255,7 @@ class ClaudeDesktopObserverWorker:
             skill_ids=self.skill_ids,
             persist_cursor=False,
         )
-        table = source.suffix in (".ldb", ".sst")
+        table = source.suffix in (".ldb", ".sst") or source.name.isdigit()  # blob files hold old calls too
         guarded = (cursor is None and table) or str(source) in self._guarded
         installed_at = getattr(self, "_installed_at", None) if guarded else None
         events = []
