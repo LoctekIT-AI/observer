@@ -28,6 +28,9 @@ from ..telemetry.langfuse import LangfuseConfig, LangfuseExporter
 from ..telemetry.health import HealthReporter
 from ..telemetry.langfuse_outbox import LangfuseContentOutbox
 from ..telemetry.identity import ObserverIdentity
+from ..telemetry.turns import TurnSpool, capture_enabled, default_send
+from . import workbuddy_turns
+from .turn_tracker import TurnTracker
 
 
 PLUGIN_ID = "workbuddy-desktop-adapter"
@@ -87,6 +90,10 @@ class WorkBuddyDesktopObserverWorker:
         self.interval_seconds = interval_seconds
         self.flush_enabled = flush
         self.health = HealthReporter(self.state_dir, "workbuddy", enabled=flush)
+        # Turns that used a Skill / MCP: user input + final reply (telemetry.turns).
+        self.turns = TurnTracker(self.state_dir, "workbuddy")
+        self.turn_spool = TurnSpool(self.state_dir)
+        self._turns_reported = 0
         self._unrecognized = 0
         self.replay = ReplayLedger(self.state_dir)
         self._replay_checked = False
@@ -226,6 +233,11 @@ class WorkBuddyDesktopObserverWorker:
             if safe.stage != "started":
                 self.outbox.enqueue(safe)
                 terminal += 1
+        if capture_enabled():
+            found = workbuddy_turns.markers(source, start, result.next_cursor.offset, session_id)
+            found = workbuddy_turns.fill(found, home=Path.home(), runtime=runtime, session_id=session_id)
+            for turn in self.turns.feed(f"{source}#{session_id}", session_id, found, events, runtime=runtime):
+                self.turn_spool.add(turn)
         self.registry.save_cursor(result.next_cursor)
         return len(events), terminal
 
@@ -239,6 +251,10 @@ class WorkBuddyDesktopObserverWorker:
         )
         if report.failed:
             raise RuntimeError("Observer delivery failed; pending events retained")
+        sent, failed = self.turn_spool.flush(default_send)
+        self._turns_reported += sent
+        if failed:
+            raise RuntimeError("Observer turn delivery failed; pending turns retained")
 
     @staticmethod
     def _error(code: str, path: Path, exc: Exception) -> dict[str, str]:
@@ -263,6 +279,7 @@ class WorkBuddyDesktopObserverWorker:
                     found, queued = self._process(source, session_id, runtime)
                     events += found
                     terminal += queued
+            self.turns.save()
             marker.update({"source_path": str(source), "file_identity": _file_identity(source), "high_water": source.stat().st_size, "complete": True, "updated_at": datetime.now(timezone.utc).isoformat()})
             _atomic_json(self.state_dir / "installation.json", marker)
         except (OSError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
@@ -287,13 +304,16 @@ class WorkBuddyDesktopObserverWorker:
             "errors": list(report.errors),
             "skipped_records": getattr(self, "_skipped_records", 0),
             "outbox": self.outbox.count_by_status(),
+            "turns_pending": self.turn_spool.pending(),
             "hooked_clients": ",".join(
                 client for client, receipt in (("workbuddy", "workbuddy-hooks-owned.json"), ("workbuddy-ai", "workbuddy-ai-hooks-owned.json"))
                 if (self.state_dir / receipt).is_file()
             ),
         }
         _atomic_json(self.state_dir / "status.json", status)
-        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed)
+        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed,
+                            turns_reported=self._turns_reported)
+        self._turns_reported = 0
         self._unrecognized = 0
         self._replayed = 0
         return report

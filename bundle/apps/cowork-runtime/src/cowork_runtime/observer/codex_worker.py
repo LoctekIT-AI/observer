@@ -28,6 +28,9 @@ from ..telemetry.langfuse import LangfuseConfig, LangfuseExporter
 from ..telemetry.health import HealthReporter
 from ..telemetry.langfuse_outbox import LangfuseContentOutbox
 from ..telemetry.identity import ObserverIdentity
+from ..telemetry.turns import TurnSpool, capture_enabled, default_send
+from . import codex_turns
+from .turn_tracker import TurnTracker
 
 INSTALLATION_ID = "install-codex-1"
 PLUGIN_ID = "codex-adapter"
@@ -118,6 +121,10 @@ class CodexObserverWorker:
         self.health = HealthReporter(self.state_dir, "codex", enabled=flush)
         self._unrecognized = 0
         self._coverage = dict.fromkeys(("skill_signals", "skill_reported", "mcp_signals", "mcp_reported"), 0)
+        # Turns that used a Skill / MCP: user input + final reply (telemetry.turns).
+        self.turns = TurnTracker(self.state_dir, "codex")
+        self.turn_spool = TurnSpool(self.state_dir)
+        self._turns_reported = 0
         self.replay = ReplayLedger(self.state_dir)
         self._replay_checked = False
         self._replayed = 0
@@ -282,6 +289,10 @@ class CodexObserverWorker:
             if event.stage != "started":
                 self.outbox.enqueue(safe)
                 terminal += 1
+        if capture_enabled():
+            found = codex_turns.markers(source, start, result.next_cursor.offset)
+            for turn in self.turns.feed(str(source), _session_id(source), found, events, not_before=installed_at):
+                self.turn_spool.add(turn)
         # ledger 和 outbox 都成功后才提交 cursor，重复投影依靠现有 event_id 去重。
         self.registry.save_cursor(result.next_cursor)
         self._guarded.discard(str(source))
@@ -294,6 +305,10 @@ class CodexObserverWorker:
                                       owner_id=f"codex-observer-{os.getpid()}-{uuid4().hex}")
             if report.failed:
                 raise RuntimeError("Observer delivery failed; pending events retained")
+            sent, failed = self.turn_spool.flush(default_send)
+            self._turns_reported += sent
+            if failed:
+                raise RuntimeError("Observer turn delivery failed; pending turns retained")
 
     @staticmethod
     def _error(code: str, path: Path, exc: Exception) -> dict[str, str]:
@@ -322,6 +337,10 @@ class CodexObserverWorker:
                     terminal += enqueued
                 except (OSError, RuntimeError, ValueError) as exc:
                     errors.append(self._error("source_invalid", source, exc))
+            try:
+                self.turns.save()
+            except OSError as exc:
+                errors.append(self._error("state_unwritable", self.turns.path, exc))
         try:
             self._flush()
         except (OSError, RuntimeError, ValueError) as exc:
@@ -333,9 +352,12 @@ class CodexObserverWorker:
             "checked_at": datetime.now(timezone.utc).isoformat(),
             "files": run.files, "events": run.events, "terminal_enqueued": terminal,
             "errors": errors, "outbox": self.outbox.count_by_status(),
+            "turns_pending": self.turn_spool.pending(),
         }
         _atomic_json(self.state_dir / "status.json", status)
-        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed, **self._coverage)
+        self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed,
+                            turns_reported=self._turns_reported, **self._coverage)
+        self._turns_reported = 0
         self._coverage = dict.fromkeys(self._coverage, 0)
         self._unrecognized = 0
         self._replayed = 0

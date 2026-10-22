@@ -153,6 +153,9 @@ def build_report(calls: list[dict], health: list[dict], *, now: datetime, latest
     people = {c["id"]: _who(c) for c in today}
     lines.append(f"【调用】{len(real)} 次（Skill {sum(c['kind'] == 'skill' for c in real)} · MCP {sum(c['kind'] == 'mcp_tool' for c in real)}"
                  f" · 失败 {len(failed)}），{len({c['id'] for c in real})} 人")
+    turns = [c for c in today if c["kind"] == "turn"]
+    if turns:
+        lines.append(f"【对话】{len(turns)} 轮用到了 Skill / MCP（已记录输入和最终回复）")
     by_client = Counter(c["runtime"] for c in real)
     if by_client:
         lines.append("按客户端：" + " · ".join(f"{_client(r)} {n}" for r, n in by_client.most_common()))

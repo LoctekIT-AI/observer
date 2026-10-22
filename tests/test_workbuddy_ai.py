@@ -83,7 +83,7 @@ def test_sync_installs_hooks_into_workbuddy_ai_only_when_it_is_installed(tmp_pat
     commands = [group["hooks"][0]["command"] for groups in raw["hooks"].values() for group in groups]
     assert "other" in commands
     ours = [command for command in commands if "workbuddy_hook_bridge.py" in command]
-    assert len(ours) == 3 and all(command.endswith("--client workbuddy-ai") for command in ours)
+    assert len(ours) == 5 and all(command.endswith("--client workbuddy-ai") for command in ours)
     main_commands = json.loads((home / ".workbuddy" / "settings.json").read_text())["hooks"]["PreToolUse"][0]["hooks"][0]["command"]
     assert ours[0].split(" --stage")[0] == main_commands.split(" --stage")[0]  # same Python and bridge as WorkBuddy
 

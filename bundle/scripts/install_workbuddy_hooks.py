@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Own only Observer's three native WorkBuddy tool hooks and their receipt."""
+"""Own only Observer's five native WorkBuddy hooks (tool calls and turn boundaries) and their receipt."""
 from __future__ import annotations
 
 import argparse
@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any
 
 LEGACY_PLUGIN = 'skill-mcp-observer@aihub-local'
-STAGES = {'PreToolUse': 'started', 'PostToolUse': 'completed', 'PostToolUseFailure': 'failed'}
+STAGES = {'PreToolUse': 'started', 'PostToolUse': 'completed', 'PostToolUseFailure': 'failed',
+    # Turn boundaries (no content in the hook record; the worker reads the turn's text locally).
+    'UserPromptSubmit': 'user_input', 'Stop': 'final_output'}
 # Other WorkBuddy builds that keep their own data folder but run the same hooks.
 # WorkBuddy AI (international build): ~/.workbuddy-ai on macOS (seen 2026-10-22).
 COMPANIONS = {'workbuddy-ai': '.workbuddy-ai'}

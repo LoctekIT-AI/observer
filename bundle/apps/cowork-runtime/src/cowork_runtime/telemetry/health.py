@@ -25,7 +25,9 @@ BUNDLE_ROOT = Path(__file__).resolve().parents[5]
 DEFAULT_INTERVAL_SECONDS = 3600
 _COUNTERS = ("events", "terminal_enqueued", "files", "sessions", "skipped_records", "unrecognized_calls", "replayed_sources",
              # coverage self-check: raw Skill/MCP-looking records vs. reported Skill/MCP calls (cumulative)
-             "skill_signals", "skill_reported", "mcp_signals", "mcp_reported")
+             "skill_signals", "skill_reported", "mcp_signals", "mcp_reported",
+             # turns with a Skill / MCP call sent with their user input and final reply (cumulative)
+             "turns_reported")
 
 
 def bundle_version() -> str:
@@ -100,6 +102,7 @@ def health_payload(runtime: str, status: dict[str, Any], *, now: datetime, total
         ("observer.health.outbox_pending", int(outbox.get("pending", 0))),
         ("observer.health.outbox_delivered", int(outbox.get("delivered", 0))),
         ("observer.health.outbox_failed", int(outbox.get("failed", 0))),
+        ("observer.health.turns_pending", status.get("turns_pending")),
     ]
     update = updater_status()
     values += [
