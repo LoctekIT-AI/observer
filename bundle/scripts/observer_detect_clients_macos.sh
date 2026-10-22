@@ -48,7 +48,19 @@ workbuddy_app=''
 for candidate in '/Applications/WorkBuddy.app' "$HOME/Applications/WorkBuddy.app"; do
     if [ -f "$candidate/Contents/Info.plist" ]; then workbuddy_app=$candidate; break; fi
 done
-if [ ! -f "$workbuddy_settings" ]; then report workbuddy-desktop missing "no $workbuddy_settings"
-elif [ -z "$workbuddy_app" ]; then report workbuddy-desktop missing "WorkBuddy settings found, but the WorkBuddy app is not installed"
-else report workbuddy-desktop found "$workbuddy_settings"; hosts+=(workbuddy-desktop); fi
+# WorkBuddy AI (the international build) is a separate app with its own ~/.workbuddy-ai
+# folder; the WorkBuddy collector covers both (its hooks are added to both settings files).
+workbuddy_ai_settings="$HOME/.workbuddy-ai/settings.json"
+workbuddy_ai_app=''
+for candidate in '/Applications/WorkBuddy AI.app' "$HOME/Applications/WorkBuddy AI.app"; do
+    if [ -f "$candidate/Contents/Info.plist" ]; then workbuddy_ai_app=$candidate; break; fi
+done
+if [ -f "$workbuddy_settings" ] && [ -n "$workbuddy_app" ]; then
+    if [ -f "$workbuddy_ai_settings" ] && [ -n "$workbuddy_ai_app" ]; then report workbuddy-desktop found "$workbuddy_settings (and WorkBuddy AI)"
+    else report workbuddy-desktop found "$workbuddy_settings"; fi
+    hosts+=(workbuddy-desktop)
+elif [ -f "$workbuddy_ai_settings" ] && [ -n "$workbuddy_ai_app" ]; then report workbuddy-desktop found "$workbuddy_ai_settings (WorkBuddy AI)"; hosts+=(workbuddy-desktop)
+elif [ -n "$workbuddy_app$workbuddy_ai_app" ]; then report workbuddy-desktop missing "WorkBuddy is installed but has not been opened yet (no settings); open it once, then install"
+elif [ -f "$workbuddy_settings" ] || [ -f "$workbuddy_ai_settings" ]; then report workbuddy-desktop missing "WorkBuddy settings found, but the WorkBuddy app is not installed"
+else report workbuddy-desktop missing "no $workbuddy_settings"; fi
 printf 'HOSTS=%s\n' "${hosts[*]-}"

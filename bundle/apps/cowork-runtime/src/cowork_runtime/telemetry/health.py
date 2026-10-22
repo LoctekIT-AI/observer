@@ -95,6 +95,8 @@ def health_payload(runtime: str, status: dict[str, Any], *, now: datetime, total
         ("observer.health.python", platform.python_version()),
         ("observer.health.error_codes", ",".join(codes) or None),
         ("observer.health.coverage_gaps", ",".join(gaps) or None),
+        # WorkBuddy: which builds carry Observer's hooks (workbuddy, workbuddy-ai).
+        ("observer.health.hooked_clients", status.get("hooked_clients") or None),
         ("observer.health.outbox_pending", int(outbox.get("pending", 0))),
         ("observer.health.outbox_delivered", int(outbox.get("delivered", 0))),
         ("observer.health.outbox_failed", int(outbox.get("failed", 0))),

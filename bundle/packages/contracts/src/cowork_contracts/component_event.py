@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 COMPONENT_EVENT_CONTRACT_VERSION = "component_event.v1"
 SKILLHUB_CATALOG_CONTRACT_VERSION = "skillhub.catalog.v1"
 
-RuntimeName = Literal["dsh", "codex", "claude", "workbuddy", "unknown"]
+RuntimeName = Literal["dsh", "codex", "claude", "workbuddy", "workbuddy-ai", "unknown"]
 ComponentKind = Literal["skill", "mcp_server", "mcp_tool", "tool", "unknown"]
 ComponentStage = Literal["started", "completed", "failed", "timeout", "cancelled"]
 EvidenceLevel = Literal["verified", "partial", "inferred", "unknown"]

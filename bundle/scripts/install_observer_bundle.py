@@ -548,6 +548,8 @@ def _install(args: argparse.Namespace) -> int:
     if host_ok:
         membership = {"hosts": list(dict.fromkeys([*previous_membership["hosts"], *_selected_hosts(args)])), "untracked_hosts": [host for host in previous_membership["untracked_hosts"] if host not in _selected_hosts(args)]}
         _write_membership(install_root, membership)
+    # WorkBuddy AI (international build) gets the same hooks; a problem there is reported, never blocks.
+    companions = workbuddy_hooks.sync_companions(main_receipt=_workbuddy_options(args)["receipt"]) if host_ok and workbuddy_selected else None
     doctor_code, doctor = _run_doctor(args) if host_ok else (2, {"status": "blocked", "reason": "host registration failed; doctor not run"})
     status = "ok" if host_ok and doctor_code == 0 else "blocked"
     return _report(args, {
@@ -556,6 +558,7 @@ def _install(args: argparse.Namespace) -> int:
         "hosts": hosts,
         **({"dsh_plugin": native_plugin, "dsh_plugin_restore": native_restore, "dsh_worker_stop": worker_stop, "dsh_worker_restore": worker_restore} if dsh_selected else {}),
         **({"workbuddy_hooks": hook_setup, "workbuddy_hooks_restore": hook_restore} if workbuddy_selected else {}),
+        **({"workbuddy_companion_hooks": companions} if companions is not None else {}),
         "host_stop": changed_workers,
         "rollback": rollback,
         "host_restore": host_restore,
@@ -600,6 +603,7 @@ def _uninstall(args: argparse.Namespace) -> int:
             stopped = _run_host(_uninstall_arguments(args)["workbuddy-desktop"] + _agent_arguments(args, "workbuddy-desktop"))
             if stopped.get("status") != "ok":
                 return _report(args, {"status": "blocked", "workbuddy_worker": stopped})
+            workbuddy_hooks.uninstall_companions(main_receipt=_workbuddy_options(args)["receipt"])
             workbuddy_hooks.uninstall(**_workbuddy_options(args))
         return _report(args, {"status": "ok", "changed": False, "reason": "observer bundle is not installed", "install_root": str(install_root)})
     membership = _installed_membership(install_root)
@@ -626,6 +630,7 @@ def _uninstall(args: argparse.Namespace) -> int:
     if outbox_result.get("status") != "ok":
         return _report(args, {"status": "blocked", "changed": False, "hosts": hosts, "outbox": outbox_result, "state_preserved": True})
     if "workbuddy-desktop" in _selected_hosts(args):
+        workbuddy_hooks.uninstall_companions(main_receipt=_workbuddy_options(args)["receipt"])
         workbuddy_hooks.uninstall(**_workbuddy_options(args))
     if "dsh" in _selected_hosts(args):
         native_plugin = _run_host([sys.executable, str(install_root / "scripts/install_dsh_observer.py"), "uninstall", "--profile-dir", str(_absolute(args.dsh_profile_dir)), "--dsh-cli", str(_absolute(args.dsh_cli))])

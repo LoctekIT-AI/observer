@@ -17,7 +17,7 @@ function Stop-Install([string]$Message) {
 
 Write-Host ''
 Write-Host '==== Observer 安装 ====' -ForegroundColor Cyan
-Write-Host 'Observer 是公司内部部署的 AI 使用统计工具：统计你在 Codex、Claude、AI Hub（DSH）、WorkBuddy 里调用了哪些 Skill 和 MCP（调用了哪个、什么时候、成功还是失败），按飞书登录的工号和姓名归属。'
+Write-Host 'Observer 是公司内部部署的 AI 使用统计工具：统计你在 Codex、Claude、AI Hub（DSH）、WorkBuddy（含 WorkBuddy AI）里调用了哪些 Skill 和 MCP（调用了哪个、什么时候、成功还是失败），按飞书登录的工号和姓名归属。'
 Write-Host '不会采集对话内容、提示词、模型输出、工具参数和返回内容。'
 Write-Host '会在本机安装：后台收集程序（当前用户的计划任务）、自动更新任务（只安装公司签名的新版本）；WorkBuddy 会加 3 个钩子，AI Hub 会加一个 Observer 插件。'
 Write-Host ''
@@ -97,5 +97,5 @@ if ($failed.Count -gt 0) {
     Write-Host ("以下客户端没有装上：{0}。其他客户端不受影响；请把上面的输出发给 AI 平台团队。" -f ($failed -join '、')) -ForegroundColor Yellow
 }
 if ($installed -contains 'dsh' -or $installed -contains 'workbuddy-desktop') {
-    Write-Host '请把 AI Hub 和 WorkBuddy 完全退出（包括托盘图标）再打开一次。' -ForegroundColor Yellow
+    Write-Host '请把 AI Hub、WorkBuddy、WorkBuddy AI 完全退出（包括托盘图标）再打开一次。' -ForegroundColor Yellow
 }

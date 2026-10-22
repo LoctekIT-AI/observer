@@ -207,6 +207,7 @@ def lifecycle(args: argparse.Namespace) -> dict:
     if args.command == "uninstall":
         native = _powershell(args, "uninstall")
         if hook_options:
+            workbuddy_hooks.uninstall_companions(main_receipt=hook_options["receipt"])
             workbuddy_hooks.uninstall(**hook_options)
         if args.host == "dsh":
             _dsh(args, "uninstall")
@@ -269,7 +270,10 @@ def lifecycle(args: argparse.Namespace) -> dict:
         except Exception as error:
             failures.append(f"selected task restore: {error}")
         raise RuntimeError(f"Windows install failed: {original}; rollback errors: {failures}") from original
-    return {"status": "ok", "host": args.host, "native": native, "bundle_version": archive.bundle_version, "desktop_event_acceptance": "unverified"}
+    # WorkBuddy AI (international build) gets the same hooks; a problem there is reported, never blocks.
+    companions = workbuddy_hooks.sync_companions(main_receipt=hook_options["receipt"]) if hook_options else None
+    return {"status": "ok", "host": args.host, "native": native, "bundle_version": archive.bundle_version, "desktop_event_acceptance": "unverified",
+        **({"workbuddy_companion_hooks": companions} if companions is not None else {})}
 
 
 def main(argv: list[str] | None = None) -> int:

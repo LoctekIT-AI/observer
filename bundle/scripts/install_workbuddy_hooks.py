@@ -15,6 +15,9 @@ from typing import Any
 
 LEGACY_PLUGIN = 'skill-mcp-observer@aihub-local'
 STAGES = {'PreToolUse': 'started', 'PostToolUse': 'completed', 'PostToolUseFailure': 'failed'}
+# Other WorkBuddy builds that keep their own data folder but run the same hooks.
+# WorkBuddy AI (international build): ~/.workbuddy-ai on macOS (seen 2026-10-22).
+COMPANIONS = {'workbuddy-ai': '.workbuddy-ai'}
 
 
 def _path(path: Path) -> Path:
@@ -109,7 +112,7 @@ def policy_paths(settings: Path, supplied: tuple[Path, ...] = ()) -> tuple[Path,
     candidates = [*supplied]
     settings_parent = settings.expanduser().absolute().parent
     config_dir = settings_parent.name
-    if config_dir not in {".workbuddy", ".codebuddy"}:
+    if config_dir not in {".workbuddy", ".workbuddy-ai", ".codebuddy"}:
         return tuple(dict.fromkeys(candidates))
     for root in (Path.cwd(), *Path.cwd().parents):
         for name in ("settings.json", "settings.local.json"):
@@ -229,7 +232,9 @@ def restore(previous: dict[Path, bytes | None], expected: dict[Path, bytes | Non
 
 
 def install(*, settings: Path, receipt: Path, python: Path, bridge: Path, event_file: Path,
-    policy_settings: tuple[Path, ...] = ()) -> dict[str, Any]:
+    policy_settings: tuple[Path, ...] = (), client: str = 'workbuddy') -> dict[str, Any]:
+    if client != 'workbuddy' and client not in COMPANIONS:
+        raise ValueError(f'unknown WorkBuddy client: {client}')
     settings, receipt, event_file = map(_path, (settings, receipt, event_file))
     python, bridge = python.expanduser().absolute(), bridge.expanduser().absolute()
     forbidden = '\x00\r\n' + ('&|<>^%!\"$`' if os.name == 'nt' else '')
@@ -251,6 +256,8 @@ def install(*, settings: Path, receipt: Path, python: Path, bridge: Path, event_
     entries = {}
     for event, stage in STAGES.items():
         argv = [str(python), str(bridge), '--stage', stage, '--event-file', str(event_file)]
+        if client != 'workbuddy':
+            argv += ['--client', client]
         command = hook_command(argv)
         entry = {'matcher': '.*', 'hooks': [{'type': 'command', 'command': command, 'timeout': 5}]}
         entries[event] = entry
@@ -311,6 +318,64 @@ def status(*, settings: Path, receipt: Path, policy_settings: tuple[Path, ...] =
         raise ValueError('Unknown Observer hook ownership receipt')
     _remove_owned(raw, owned); _conflicts(raw)
     return {'status': 'ok', 'hooks_installed': list(owned['entries']), 'native_event_acceptance': 'unverified'}
+
+
+def _main_hook_paths(main_receipt: Path) -> tuple[Path, Path, Path]:
+    """Python, bridge and event file the main WorkBuddy hooks already run with."""
+    owned = _read(_path(main_receipt))
+    if owned.get('schema') != 'observer.workbuddy.hooks.v1':
+        raise ValueError('WorkBuddy hooks are not installed by Observer')
+    command = owned['entries']['PreToolUse']['hooks'][0]['command']
+    argv = shlex.split(command, posix=True)
+    if len(argv) < 2:
+        raise ValueError('unexpected WorkBuddy hook command')
+    return Path(argv[0]), Path(argv[1]), Path(owned['event_file'])
+
+
+def companion_receipt(main_receipt: Path, client: str) -> Path:
+    return main_receipt.parent / f'{client}-hooks-owned.json'
+
+
+def sync_companions(*, main_receipt: Path, home: Path | None = None) -> dict[str, Any]:
+    """Add Observer's hooks to WorkBuddy AI (and later builds) when they are installed.
+
+    Runs after every WorkBuddy install and from the updater every 30 minutes, so a
+    build installed after Observer is picked up without reinstalling. The hooks are
+    the same as WorkBuddy's (same Python, bridge and event file) plus --client.
+    A build that is not installed is left alone; a failure is reported, never raised.
+    """
+    home = Path.home() if home is None else home
+    results: dict[str, Any] = {}
+    for client, folder in COMPANIONS.items():
+        settings = home / folder / 'settings.json'
+        receipt = companion_receipt(main_receipt, client)
+        if not settings.parent.is_dir():
+            results[client] = {'status': 'not_installed'}
+            continue
+        try:
+            python, bridge, event_file = _main_hook_paths(main_receipt)
+            before = settings.read_bytes() if settings.exists() else None
+            result = install(settings=settings, receipt=receipt, python=python, bridge=bridge,
+                event_file=event_file, client=client)
+            after = settings.read_bytes() if settings.exists() else None
+            results[client] = {**result, 'changed': before != after}
+        except (OSError, ValueError, KeyError, TypeError, IndexError) as error:
+            results[client] = {'status': 'blocked', 'error_type': type(error).__name__, 'reason': str(error)}
+    return results
+
+
+def uninstall_companions(*, main_receipt: Path, home: Path | None = None) -> dict[str, Any]:
+    home = Path.home() if home is None else home
+    results: dict[str, Any] = {}
+    for client, folder in COMPANIONS.items():
+        receipt = companion_receipt(main_receipt, client)
+        if not receipt.exists():
+            continue
+        try:
+            results[client] = uninstall(settings=home / folder / 'settings.json', receipt=receipt)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            results[client] = {'status': 'blocked', 'error_type': type(error).__name__, 'reason': str(error)}
+    return results
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -25,6 +25,9 @@ _MAX_SESSION_ID = 256
 _MAX_TOOL_NAME = 512
 _MAX_INVOCATION_ID = 256
 _MAX_SKILL_ID = 512
+# WorkBuddy AI (the international build) is the same client with its own data
+# folder; its hooks pass --client so its calls are reported under their own name.
+CLIENTS = ("workbuddy", "workbuddy-ai")
 
 
 def _utc_now() -> str:
@@ -195,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--stage", required=True, choices=sorted(_STAGE_TO_HOOK))
     parser.add_argument("--event-file", type=Path, help="explicit absolute native hook output path")
+    parser.add_argument("--client", choices=CLIENTS, default="workbuddy")
     args = parser.parse_args(argv)
     try:
         raw = sys.stdin.buffer.read()
@@ -210,6 +214,8 @@ def main(argv: list[str] | None = None) -> int:
             if args.stage not in {"completed", "failed"}:
                 raise
             event = _unrecognized_event(payload, stage=args.stage)
+        if args.client != "workbuddy":
+            event["client"] = args.client
         path = _event_path(args.event_file)
         _append_line(path, (json.dumps(event, separators=(",", ":")) + "\n").encode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError, OSError, ValueError) as exc:

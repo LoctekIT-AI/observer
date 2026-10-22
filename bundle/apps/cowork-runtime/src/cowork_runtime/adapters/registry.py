@@ -103,7 +103,7 @@ class PluginRegistry:
     def _validate_workbuddy_manifest(manifest: PluginManifestV1) -> None:
         """Keep unverified WorkBuddy sources outside the official registry."""
 
-        if manifest.runtime != "workbuddy":
+        if manifest.runtime not in {"workbuddy", "workbuddy-ai"}:
             return
         capabilities = set(manifest.capabilities)
         if (

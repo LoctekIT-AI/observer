@@ -121,8 +121,9 @@ class WorkBuddyDesktopObserverWorker:
         return self.source_root
 
     @staticmethod
-    def _session_ids(source: Path) -> tuple[str, ...]:
-        sessions: set[str] = set()
+    def _session_ids(source: Path) -> dict[str, str]:
+        """Session id -> runtime (workbuddy, or workbuddy-ai for the international build)."""
+        sessions: dict[str, str] = {}
         with source.open("r", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
@@ -137,8 +138,9 @@ class WorkBuddyDesktopObserverWorker:
                     continue
                 session_id = record.get("session_id")
                 if isinstance(session_id, str) and session_id.strip():
-                    sessions.add(session_id.strip())
-        return tuple(sorted(sessions))
+                    runtime = "workbuddy-ai" if record.get("client") == "workbuddy-ai" else "workbuddy"
+                    sessions.setdefault(session_id.strip(), runtime)
+        return dict(sorted(sessions.items()))
 
     def _marker(self, source: Path) -> tuple[dict, int]:
         path = self.state_dir / "installation.json"
@@ -153,12 +155,12 @@ class WorkBuddyDesktopObserverWorker:
             return {"source_path": str(source), "file_identity": identity, "high_water": 0, "complete": False}, 0
         return payload, int(payload.get("high_water", 0))
 
-    def _register(self, session_id: str) -> str:
+    def _register(self, session_id: str, runtime: str = "workbuddy") -> str:
         installation_id = _installation_id(session_id)
         if self.store.get_adapter_plugin(PLUGIN_ID, installation_id) is None:
             self.registry.register(PluginManifestV1(
                 plugin_id=PLUGIN_ID,
-                runtime="workbuddy",
+                runtime=runtime,
                 contract_version=COMPONENT_EVENT_CONTRACT_VERSION,
                 installation_id=installation_id,
                 enabled=True,
@@ -173,10 +175,10 @@ class WorkBuddyDesktopObserverWorker:
             )
         return installation_id
 
-    def _initialize(self, source: Path, sessions: tuple[str, ...], marker: dict, previous_high_water: int) -> int:
+    def _initialize(self, source: Path, sessions: dict[str, str], marker: dict, previous_high_water: int) -> int:
         initialized = 0
-        for session_id in sessions:
-            installation_id = self._register(session_id)
+        for session_id, runtime in sessions.items():
+            installation_id = self._register(session_id, runtime)
             if self.registry.cursor(installation_id, str(source)) is None:
                 offset = source.stat().st_size if not marker.get("complete") else previous_high_water
                 self.registry.save_cursor(CodexCursor(
@@ -198,8 +200,8 @@ class WorkBuddyDesktopObserverWorker:
         self._replayed += rewound
         self._guarded |= guarded
 
-    def _process(self, source: Path, session_id: str) -> tuple[int, int]:
-        installation_id = self._register(session_id)
+    def _process(self, source: Path, session_id: str, runtime: str = "workbuddy") -> tuple[int, int]:
+        installation_id = self._register(session_id, runtime)
         identity = _file_identity(source)
         cursor = self.registry.cursor(installation_id, str(source))
         start = cursor.offset if cursor and cursor.file_identity == identity else 0
@@ -248,7 +250,7 @@ class WorkBuddyDesktopObserverWorker:
     def _poll(self) -> WorkBuddyObserverRun:
         errors: list[dict[str, str]] = []
         source: Path | None = None
-        sessions: tuple[str, ...] = ()
+        sessions: dict[str, str] = {}
         events = terminal = initialized = 0
         try:
             source = self._source()
@@ -257,8 +259,8 @@ class WorkBuddyDesktopObserverWorker:
             initialized = self._initialize(source, sessions, marker, previous_high_water)
             if marker.get("complete"):
                 self._apply_replay()
-                for session_id in sessions:
-                    found, queued = self._process(source, session_id)
+                for session_id, runtime in sessions.items():
+                    found, queued = self._process(source, session_id, runtime)
                     events += found
                     terminal += queued
             marker.update({"source_path": str(source), "file_identity": _file_identity(source), "high_water": source.stat().st_size, "complete": True, "updated_at": datetime.now(timezone.utc).isoformat()})
@@ -285,6 +287,10 @@ class WorkBuddyDesktopObserverWorker:
             "errors": list(report.errors),
             "skipped_records": getattr(self, "_skipped_records", 0),
             "outbox": self.outbox.count_by_status(),
+            "hooked_clients": ",".join(
+                client for client, receipt in (("workbuddy", "workbuddy-hooks-owned.json"), ("workbuddy-ai", "workbuddy-ai-hooks-owned.json"))
+                if (self.state_dir / receipt).is_file()
+            ),
         }
         _atomic_json(self.state_dir / "status.json", status)
         self.health.observe(status, unrecognized_calls=self._unrecognized, replayed_sources=self._replayed)

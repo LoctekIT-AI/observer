@@ -436,6 +436,37 @@ class Updater:
         os.close(descriptor)
         return lock
 
+    # ---- WorkBuddy AI
+    def workbuddy_receipt(self) -> Path | None:
+        """The main WorkBuddy hook receipt (Windows: <root>/state/workbuddy-desktop, macOS: AIHub/workbuddy-observer)."""
+        for candidate in (self.bundle.parent / "state" / "workbuddy-desktop" / "workbuddy-hooks-owned.json",
+                          self.bundle.parent.parent / "workbuddy-observer" / "workbuddy-hooks-owned.json"):
+            if candidate.is_file():
+                return candidate
+        return None
+
+    def sync_workbuddy_companions(self) -> dict | None:
+        """Every run (30 min): add Observer's hooks to WorkBuddy AI when it was installed after Observer."""
+        if "workbuddy-desktop" not in installed_hosts(self.bundle) or (self.state_dir / "updater.lock").exists():
+            return None
+        receipt = self.workbuddy_receipt()
+        if receipt is None:
+            return {"status": "receipt_missing"}
+        try:
+            scripts = str(Path(__file__).resolve().parent)
+            if scripts not in sys.path:
+                sys.path.insert(0, scripts)
+            import install_workbuddy_hooks
+            result = install_workbuddy_hooks.sync_companions(main_receipt=receipt)
+        except Exception as exc:  # the updater must never take anything else down
+            result = {"status": "internal_error", "error_type": type(exc).__name__}
+        try:
+            self.state_dir.mkdir(parents=True, exist_ok=True)
+            _atomic_json(self.state_dir / "workbuddy-companions.json", {"checked_at": _iso(self.now()), "result": result})
+        except OSError:
+            pass
+        return result
+
     # ---- main
     def run(self, *, force: bool = False, dry_run: bool = False) -> dict:
         self._dry_run = dry_run
@@ -650,6 +681,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "status":
         print(json.dumps(updater._state(), indent=2, sort_keys=True))
         return 0
+    if args.command == "run":
+        updater.sync_workbuddy_companions()
     result = updater.run(force=getattr(args, "force", False), dry_run=args.command == "check")
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0

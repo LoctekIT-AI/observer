@@ -66,7 +66,8 @@ $detected = [ordered]@{
     'codex' = (Test-Path -LiteralPath $codexSource -PathType Container)
     'claude' = (Test-Path -LiteralPath $claudeSource -PathType Container)
     'dsh' = ([bool]$dshProfile -and (Test-Path -LiteralPath $dshProfile -PathType Container) -and [bool]$dshCli)
-    'workbuddy-desktop' = (Test-Path -LiteralPath $workbuddySettings -PathType Leaf)
+    # WorkBuddy AI (international build) keeps its own folder; the WorkBuddy collector covers both.
+    'workbuddy-desktop' = ((Test-Path -LiteralPath $workbuddySettings -PathType Leaf) -or (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.workbuddy-ai\settings.json') -PathType Leaf))
 }
 if (-not $detected['dsh'] -and ((Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.dsh\profiles') -PathType Container) -or (Test-Path -LiteralPath (Join-Path $env:APPDATA 'AI Hub\ah-home\profiles') -PathType Container))) {
     Write-Output "dsh`tfound-incomplete (an AI Hub / DeepSeek Harness profile is present but its launcher was not found; skipped)"

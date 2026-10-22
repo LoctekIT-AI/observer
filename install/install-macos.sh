@@ -10,7 +10,7 @@ fail() { printf '\n安装没有完成：%s\n' "$1" >&2; exit 1; }
 ask() { local answer=''; if [ "${OBSERVER_ASSUME_YES:-}" = 1 ]; then answer=Y; else read -r -p "$1" answer < /dev/tty || true; fi; printf '%s' "$answer"; }
 
 printf '\n==== Observer 安装 ====\n'
-printf '%s\n' 'Observer 是公司内部部署的 AI 使用统计工具：统计你在 Codex、Claude、AI Hub（DSH）、WorkBuddy 里调用了哪些 Skill 和 MCP（调用了哪个、什么时候、成功还是失败），按飞书登录的工号和姓名归属。'
+printf '%s\n' 'Observer 是公司内部部署的 AI 使用统计工具：统计你在 Codex、Claude、AI Hub（DSH）、WorkBuddy（含 WorkBuddy AI）里调用了哪些 Skill 和 MCP（调用了哪个、什么时候、成功还是失败），按飞书登录的工号和姓名归属。'
 printf '%s\n' '不会采集对话内容、提示词、模型输出、工具参数和返回内容。'
 printf '%s\n\n' '会在本机安装：后台收集程序（LaunchAgent）、自动更新任务（只安装公司签名的新版本）；WorkBuddy 会加 3 个钩子，AI Hub 会加一个 Observer 插件。'
 
@@ -62,4 +62,4 @@ for name in $selected; do case " $skipped " in *" $name "*) ;; *) installed="$in
 printf '\n安装完成：%s。之后采集和上报都在后台自动进行，也会自动更新。\n' "${installed# }"
 [ -z "$skipped" ] || printf '已跳过（客户端版本太旧，Observer 还不支持）：%s。其他客户端不受影响；升级这个客户端后再双击安装一次即可。\n' "${skipped% }"
 [ -z "$noted" ] || printf '提示：%s 的版本比测试过的新（或读不到版本），已照常安装；读不懂的调用会单独统计，不影响使用。\n' "${noted% }"
-case " $installed " in *" dsh "*|*" workbuddy-desktop "*) printf '请把 AI Hub 和 WorkBuddy 完全退出（Cmd+Q）再打开一次。\n' ;; esac
+case " $installed " in *" dsh "*|*" workbuddy-desktop "*) printf '请把 AI Hub、WorkBuddy、WorkBuddy AI 完全退出（Cmd+Q）再打开一次。\n' ;; esac

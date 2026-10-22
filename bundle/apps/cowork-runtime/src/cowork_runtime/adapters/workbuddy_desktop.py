@@ -79,6 +79,11 @@ def _component_details(tool_name: str) -> tuple[str, str]:
     return "tool", "tool_call"
 
 
+def _record_runtime(record: dict[str, Any]) -> str:
+    """WorkBuddy AI (international build) hooks tag their records with client=workbuddy-ai."""
+    return "workbuddy-ai" if record.get("client") == "workbuddy-ai" else "workbuddy"
+
+
 def _skill_id_from_result(value: object) -> str | None:
     if not isinstance(value, str):
         return None
@@ -181,7 +186,7 @@ class WorkBuddyDesktopAdapter:
                     record_session = record.get("session_id")
                     if record_session == session_id:
                         events.append(degraded_event(
-                            runtime="workbuddy", plugin_id="workbuddy-desktop-adapter",
+                            runtime=_record_runtime(record), plugin_id="workbuddy-desktop-adapter",
                             installation_id=installation_id, session_id=session_id, run_id=run_id or session_id,
                             native_call=f"{source_path.name}:{line_offset}", hint=record.get("hint") or schema_version,
                             occurred_at=_parse_datetime(record.get("occurred_at"), default=current_time),
@@ -222,7 +227,7 @@ class WorkBuddyDesktopAdapter:
                     diagnostics.append(f"unrecognized record at offset {line_offset}")
                     if record.get("session_id") == session_id and record.get("stage") in {"completed", "failed"}:
                         events.append(degraded_event(
-                            runtime="workbuddy", plugin_id="workbuddy-desktop-adapter",
+                            runtime=_record_runtime(record), plugin_id="workbuddy-desktop-adapter",
                             installation_id=installation_id, session_id=session_id, run_id=run_id or session_id,
                             native_call=f"{source_path.name}:{line_offset}", hint=record.get("tool_name") or "hook",
                             occurred_at=_parse_datetime(record.get("occurred_at"), default=current_time),
@@ -322,7 +327,7 @@ class WorkBuddyDesktopAdapter:
             event_id=_stable_event_id(installation_id, session_id, invocation_id, stage),
             invocation_id=invocation_id,
             run_id=run_id,
-            runtime="workbuddy",
+            runtime=_record_runtime(record),
             plugin_id="workbuddy-desktop-adapter",
             component_kind=component_kind,
             component_id=tool_name,
