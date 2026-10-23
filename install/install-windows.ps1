@@ -72,6 +72,9 @@ if (-not $AssumeYes) {
 }
 
 # 5. 安装（第一次会打开浏览器，用飞书登录一次）
+# 记下安装前本机有哪些 WorkBuddy（安装会写钩子，之后就分不清了），结尾只提示真正装了的客户端。
+$hadWorkBuddy = Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.workbuddy\settings.json') -PathType Leaf
+$hadWorkBuddyAi = Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.workbuddy-ai\settings.json') -PathType Leaf
 Write-Host ''
 Write-Host '开始安装。第一次安装会打开浏览器，请用飞书登录；之后不会再要求登录。'
 $resultFile = Join-Path $work 'install-result.tsv'
@@ -93,6 +96,12 @@ Write-Host ("安装完成：{0}。之后采集和上报都在后台自动进行�
 if ($failed.Count -gt 0) {
     Write-Host ("以下客户端没有装上：{0}。其他客户端不受影响；请把上面的输出发给 AI 平台团队。" -f ($failed -join '、')) -ForegroundColor Yellow
 }
-if ($installed -contains 'dsh' -or $installed -contains 'workbuddy-desktop') {
-    Write-Host '请把 AI Hub、WorkBuddy、WorkBuddy AI 完全退出（包括托盘图标）再打开一次。' -ForegroundColor Yellow
+$restart = @()
+if ($installed -contains 'dsh') { $restart += 'AI Hub' }
+if ($installed -contains 'workbuddy-desktop') {
+    if ($hadWorkBuddy) { $restart += 'WorkBuddy' }
+    if ($hadWorkBuddyAi) { $restart += 'WorkBuddy AI' }
+}
+if ($restart.Count -gt 0) {
+    Write-Host ('请把 {0} 完全退出（包括托盘图标）再打开一次。' -f ($restart -join '、')) -ForegroundColor Yellow
 }
