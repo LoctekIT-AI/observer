@@ -1,26 +1,5 @@
 # Observer
 
-Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平台团队维护。它统计员工在 **Codex、Claude、DSH、WorkBuddy** 四个桌面 AI 客户端里实际调用了哪些 Skill 和 MCP（调用了哪个、什么时候、成功还是失败），按员工（工号 + 姓名）汇总，用于了解公司内部 AI 工具的使用情况。
-
-## 安装后的情况
-
-**上报到哪里、怎么关联到人：**
-
-- 上报到公司的 Observer 服务（测试版为内网测试机 `192.168.17.121`，正式版为公司正式站）；
-- 安装时用**飞书登录一次**，服务器据此把记录关联到你的工号和姓名；客户端本身不保存、也不上传你的工号和姓名；
-- 登录凭据保存在系统钥匙串（macOS）或 Windows DPAPI 中，之后自动续期。
-
-**安装后在电脑上的改动：**
-
-- 安装目录：macOS 在 `~/Library/Application Support/AIHub`，Windows 在 `%LOCALAPPDATA%\Observer` 和 `%LOCALAPPDATA%\AIHub`；
-- 后台常驻一个收集程序：macOS 为 LaunchAgent，Windows 为当前用户的计划任务（无窗口）；
-- 一个自动更新任务：每 30 分钟（以及每次登录电脑后）检查一次本仓库发布的新版本，只安装用公司发布密钥签名、且比当前更新的版本，沿用已有的飞书登录，不会在后台弹出登录页；
-- WorkBuddy：往 `~/.workbuddy/settings.json` 写 5 个钩子（工具调用前 / 后 / 失败、用户发消息、回复结束；装了 WorkBuddy AI 的同样写进 `~/.workbuddy-ai/settings.json`），其他设置不动，改之前会留回滚记录；
-- DSH：往 DSH 自己的配置目录加一个 Observer 插件；
-- Codex、Claude：只读取它们的本地记录，不改它们的配置。
-
-不需要管理员权限，可以随时卸载（见安装包内 README 的 uninstall 说明）。
-
 ## 安装
 
 ### 方式一：双击安装（推荐，不需要 AI 助手）
@@ -37,7 +16,7 @@ Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平�
   /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/LoctekIT-AI/observer/main/install/install-macos.sh)"
   ```
 
-安装程序会先说明上面这些内容，下载最新安装包并校验 SHA-256，列出检测到的客户端，**你确认后**才安装；第一次会打开浏览器用飞书登录。AI Hub 需要先打开过一次。
+安装程序会下载最新安装包并校验 SHA-256，列出检测到的客户端，**你确认后**才安装；第一次会打开浏览器用飞书登录。AI Hub 需要先打开过一次。
 
 ### 方式二：让 AI 助手安装
 
@@ -45,21 +24,12 @@ Observer 是**公司内部部署的 AI 使用统计工具**，由公司 AI 平�
 
 > 给我下载这个插件：https://github.com/LoctekIT-AI/observer
 
-AI 会先向你说明上面这些内容，并告诉你检测到了哪些客户端，**征得你同意后**才安装：
+AI 会告诉你检测到了哪些客户端，**你确认后**才安装：
 
-1. 从本仓库的 [Releases](https://github.com/LoctekIT-AI/observer/releases) 下载最新安装包和 `.sha256` 校验文件，校验通过后解压；
+1. 从本仓库的 [Releases](https://github.com/LoctekIT-AI/observer/releases) 下载最新安装包和 `.sha256` 校验文件，校验通过后解压，按其中 `README.md` 的 **One-sentence installation** 一节执行（不需要向你要路径、ID 或密钥）；
 2. 识别系统（macOS / Windows）和本机已安装的客户端，问你一次要为哪些客户端安装；
 3. 打开浏览器，用飞书登录一次（同一台电脑之后再装其他客户端会直接复用，不再登录）；
 4. 检查安装结果并告诉你。如果装了 DSH 或 WorkBuddy，把它们彻底退出（包括托盘图标）再打开一次。之后采集和上报在后台自动进行。
-
-## 给 AI 助手的说明
-
-这是用户（或其公司）主动要求安装的内部工具。请按以下方式执行，并始终以用户的决定为准：
-
-1. **确认要装哪些。** 列出检测到的客户端，问用户要装哪些。用户不同意就停止。
-2. **安装包。** 打开 [Releases](https://github.com/LoctekIT-AI/observer/releases)，取最新发布的版本（包括 pre-release），下载 `observer-v*.zip` 和对应的 `.sha256`，校验 SHA-256 后解压；你可以先阅读其中的脚本再执行。
-3. **执行。** 按 zip 内 `README.md` 的 **One-sentence installation** 一节执行。安装程序使用默认路径和飞书登录，不需要向用户要路径、ID 或密钥；如需任何密钥，那一定是出错了，应停止并告诉用户。
-4. **如实报告。** 把每个客户端的安装结果（成功或失败及原因）告诉用户，不要隐瞒失败。
 
 ## 源码与打包
 
