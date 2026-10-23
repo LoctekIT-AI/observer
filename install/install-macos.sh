@@ -10,8 +10,6 @@ fail() { printf '\n安装没有完成：%s\n' "$1" >&2; exit 1; }
 ask() { local answer=''; if [ "${OBSERVER_ASSUME_YES:-}" = 1 ]; then answer=Y; else read -r -p "$1" answer < /dev/tty || true; fi; printf '%s' "$answer"; }
 
 printf '\n==== Observer 安装 ====\n'
-printf '%s\n' 'Observer 是公司内部部署的 AI 使用统计工具：统计你在 Codex、Claude、AI Hub（DSH）、WorkBuddy（含 WorkBuddy AI）里调用了哪些 Skill 和 MCP（调用了哪个、什么时候、成功还是失败），按飞书登录的工号和姓名归属。'
-printf '%s\n\n' '会在本机安装：后台收集程序（LaunchAgent）、自动更新任务（只安装公司签名的新版本）；WorkBuddy 会加 5 个钩子，AI Hub 会加一个 Observer 插件。'
 
 work=$(/usr/bin/mktemp -d /private/tmp/observer-install.XXXXXX)
 channel_url="https://raw.githubusercontent.com/$REPO/main/channels/$CHANNEL.json"

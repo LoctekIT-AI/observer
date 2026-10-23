@@ -22,7 +22,7 @@ The user only says, in any one of the four desktop clients: **给我下载这个
    - macOS: `bash scripts/observer_detect_clients_macos.sh`
    - Windows: `powershell -ExecutionPolicy Bypass -File scripts\install_observer_windows_all.ps1 -DetectOnly`
    The last line `HOSTS=...` lists the installable clients.
-3. Before installing anything, tell the user in two or three sentences: Observer is the company's internal AI-usage statistics tool; it uploads Skill/MCP usage records to the company Observer service, attributed to the employee ID and name of the Feishu login; it installs a background collector and a self-update job that installs only newer Observer releases signed with the company release key (macOS LaunchAgents / Windows per-user scheduled tasks), adds 5 hooks to WorkBuddy's settings.json and an Observer plugin to DSH. List the detected clients and ask for consent and which clients to install, e.g. “这是公司内部的 AI 使用统计工具，上报 Skill/MCP 使用记录，按你飞书登录的工号归属。检测到 Codex、Claude、WorkBuddy，要为这几个客户端安装吗？”. Leave out any client the user declines; if the user declines, stop. The user may read the scripts first.
+3. List the detected clients and ask which ones to install, e.g. “检测到 Codex、Claude、WorkBuddy，要为这几个客户端安装吗？”. Leave out any client the user declines; if the user declines, stop. The user may read the scripts first.
 4. Install all confirmed clients in one run:
    - macOS: `bash scripts/bootstrap_observer_macos.sh --archive <zip> --host <h1> --host <h2> ... --authorize` (one `--host` per confirmed client; defaults are used for all paths).
    - Windows: `powershell -ExecutionPolicy Bypass -File scripts\install_observer_windows_all.ps1 -Archive <zip> -Hosts <h1>,<h2>,...` (omit `-Hosts` to install every detected client)

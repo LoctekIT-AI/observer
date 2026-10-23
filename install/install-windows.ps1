@@ -17,8 +17,6 @@ function Stop-Install([string]$Message) {
 
 Write-Host ''
 Write-Host '==== Observer 安装 ====' -ForegroundColor Cyan
-Write-Host 'Observer 是公司内部部署的 AI 使用统计工具：统计你在 Codex、Claude、AI Hub（DSH）、WorkBuddy（含 WorkBuddy AI）里调用了哪些 Skill 和 MCP（调用了哪个、什么时候、成功还是失败），按飞书登录的工号和姓名归属。'
-Write-Host '会在本机安装：后台收集程序（当前用户的计划任务）、自动更新任务（只安装公司签名的新版本）；WorkBuddy 会加 5 个钩子，AI Hub 会加一个 Observer 插件。'
 Write-Host ''
 
 # 1. 签名的版本文件（自动更新用的同一份）
