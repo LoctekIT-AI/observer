@@ -38,6 +38,48 @@ function Invoke-ObserverCleanModuleRelaunch([string]$ScriptPath, $Bound) {
     return $true
 }
 
+# A symbolic link or junction (not other reparse points such as OneDrive or deduplicated files).
+function Test-ObserverLink($Item) {
+    if (($Item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -eq 0) { return $false }
+    $linkType = $null
+    if ($Item.PSObject.Properties['LinkType']) { $linkType = $Item.LinkType }
+    return ($linkType -in @('SymbolicLink', 'Junction')) -or ($Item.PSObject.Properties['Target'] -and @($Item.Target | Where-Object { $_ }).Count -gt 0)
+}
+
+# The real location of a path: every symbolic link or junction on the way is replaced by its
+# target (e.g. C:\Users\me\.codex -> D:\data\.codex). Parts that do not exist yet are kept.
+# Installers then work only with real locations, so nothing is written or removed through a link.
+function Get-ObserverCanonicalPath([string]$Value) {
+    if (-not $Value) { return $Value }
+    $full = [System.IO.Path]::GetFullPath($Value)
+    for ($hop = 0; $hop -lt 16; $hop++) {
+        $root = [System.IO.Path]::GetPathRoot($full)
+        $separator = [System.IO.Path]::DirectorySeparatorChar
+        $parts = @($full.Substring($root.Length).Split($separator) | Where-Object { $_ })
+        $prefix = $root
+        $replaced = $false
+        for ($index = 0; $index -lt $parts.Count; $index++) {
+            $next = Join-Path $prefix $parts[$index]
+            if (-not (Test-Path -LiteralPath $next)) { break }
+            $item = Get-Item -LiteralPath $next -Force
+            if (Test-ObserverLink $item) {
+                $target = @($item.Target | Where-Object { $_ }) | Select-Object -First 1
+                if (-not $target) { throw "Observer cannot resolve the link $next" }
+                $target = [string]$target
+                if ($target.StartsWith('\\?\')) { $target = $target.Substring(4) }
+                if (-not [System.IO.Path]::IsPathRooted($target)) { $target = Join-Path $prefix $target }
+                $rest = @(if ($index + 1 -lt $parts.Count) { $parts[($index + 1)..($parts.Count - 1)] })
+                $full = if ($rest.Count -gt 0) { [System.IO.Path]::GetFullPath((Join-Path $target ($rest -join $separator))) } else { [System.IO.Path]::GetFullPath($target) }
+                $replaced = $true
+                break
+            }
+            $prefix = $next
+        }
+        if (-not $replaced) { return $full }
+    }
+    throw "Observer found too many links in $Value"
+}
+
 function Resolve-ObserverInputPath([string]$Value) {
     if ($Value -notmatch '^(?:[A-Za-z]:\\|\\\\[^\\]+\\[^\\]+(?:\\|$))' -or $Value.StartsWith('\\?\') -or $Value.StartsWith('\\.\') -or $Value.Contains('"') -or $Value.Contains([char]0) -or $Value.Contains("`n") -or $Value.Contains("`r")) { throw 'Observer inputs require explicit supported absolute paths' }
     $full = [System.IO.Path]::GetFullPath($Value)
@@ -46,7 +88,7 @@ function Resolve-ObserverInputPath([string]$Value) {
         if (Test-Path -LiteralPath $candidate) {
             $item = Get-Item -LiteralPath $candidate -Force
             # PS5.1 has no unified link canonicalization API; reject reparse aliases and require explicit real paths to avoid out-of-bounds deletes.
-            if (($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Observer input contains a link or junction; use its explicit canonical path' }
+            if (Test-ObserverLink $item) { throw 'Observer input contains a link or junction; use its explicit canonical path' }
         }
         $candidate = [System.IO.Path]::GetDirectoryName($candidate)
     }

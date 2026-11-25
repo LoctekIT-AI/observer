@@ -82,6 +82,15 @@ if ($DetectOnly) { return }
 if ($selected.Count -eq 0) { throw 'No supported desktop AI client was detected' }
 if ($Mode -eq 'install' -and -not $Archive) { throw '-Archive is required for install' }
 $single = Join-Path $PSScriptRoot 'install_observer_windows.ps1'
+# Some machines keep a client's folder (or the whole profile) elsewhere behind a link or junction,
+# e.g. %USERPROFILE%\.codex -> D:\.codex. Use the real locations from here on.
+$Root = Get-ObserverCanonicalPath $Root
+$ConfigFile = Get-ObserverCanonicalPath $ConfigFile
+$codexSource = Get-ObserverCanonicalPath $codexSource
+$claudeSource = Get-ObserverCanonicalPath $claudeSource
+$workbuddySettings = Get-ObserverCanonicalPath $workbuddySettings
+if ($dshProfile) { $dshProfile = Get-ObserverCanonicalPath $dshProfile }
+if ($dshCli) { $dshCli = Get-ObserverCanonicalPath $dshCli }
 $failedHosts = @()
 $okHosts = @()
 $results = @()
