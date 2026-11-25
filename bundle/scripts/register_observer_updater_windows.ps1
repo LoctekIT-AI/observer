@@ -12,8 +12,13 @@ Assert-ObserverWindows
 $sid = [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value
 $taskName = "AIHub Skill MCP Observer Updater - $sid"
 $existing = Find-ObserverTask $taskName
+# Startup-item fallback (see observer_windows_common.ps1).
+$observerRoot = if ($UpdaterScript) { [System.IO.Path]::GetDirectoryName([System.IO.Path]::GetDirectoryName([System.IO.Path]::GetDirectoryName($UpdaterScript))) } else { Join-Path $env:LOCALAPPDATA 'Observer' }
+$jobsDirectory = Join-Path $observerRoot 'startup'
+$jobFile = Join-Path $jobsDirectory 'updater.json'
+$startupJob = Test-Path -LiteralPath $jobFile
 if ($Mode -eq 'status') {
-    @{status='ok'; task=$taskName; installed=($null -ne $existing); task_state=$(if ($existing) { [string]$existing.State } else { '' })} | ConvertTo-Json -Compress
+    @{status='ok'; task=$taskName; installed=(($null -ne $existing) -or $startupJob); launch_mode=$(if ($existing) { 'task' } elseif ($startupJob) { 'startup' } else { '' }); task_state=$(if ($existing) { [string]$existing.State } else { '' })} | ConvertTo-Json -Compress
     return
 }
 if ($Mode -eq 'uninstall') {
@@ -21,7 +26,8 @@ if ($Mode -eq 'uninstall') {
         Stop-ObserverTask $taskName
         Unregister-ScheduledTask -TaskName $taskName -TaskPath '\' -Confirm:$false
     }
-    @{status='ok'; task=$taskName; removed=($null -ne $existing)} | ConvertTo-Json -Compress
+    if ($startupJob) { Remove-Item -LiteralPath $jobFile -Force; [void](Disable-ObserverSupervisorIfIdle $jobsDirectory) }
+    @{status='ok'; task=$taskName; removed=(($null -ne $existing) -or $startupJob)} | ConvertTo-Json -Compress
     return
 }
 if (-not $PythonExecutable -or -not $UpdaterScript -or -not $StateDirectory) { throw 'install requires -PythonExecutable, -UpdaterScript and -StateDirectory' }
@@ -52,6 +58,18 @@ $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interact
 # Priority 5 (normal): the Task Scheduler default 7 runs the installer at low CPU and I/O priority, which made a
 # background update take more than ten minutes.
 $settings = New-ScheduledTaskSettingsSet -Priority 5 -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Hours 2) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Description 'AIHub Observer signed self-update' -Force | Out-Null
+try {
+    Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Description 'AIHub Observer signed self-update' -Force -ErrorAction Stop | Out-Null
+} catch {
+    if (-not (Test-ObserverAccessDenied $_)) { throw }
+    # No scheduled tasks on this computer: the startup-item supervisor runs the updater every 30 minutes.
+    $job = @{ name = 'updater'; kind = 'periodic'; execute = $execute; arguments = $arguments; cwd = $StateDirectory; delay_seconds = 600; interval_seconds = 1800; timeout_seconds = 7200 }
+    $previous = if ($startupJob) { [System.IO.File]::ReadAllText($jobFile) | ConvertFrom-Json } else { $null }
+    if ($null -eq $previous -or $previous.execute -ne $execute -or $previous.arguments -ne $arguments) { Set-ObserverStartupJob $jobFile $job }
+    Enable-ObserverSupervisor $jobsDirectory $PythonExecutable (Join-Path ([System.IO.Path]::GetDirectoryName($UpdaterScript)) 'observer_supervisor_windows.py')
+    @{status='ok'; task=$taskName; changed=$true; launch_mode='startup'} | ConvertTo-Json -Compress
+    return
+}
 if ($null -eq (Find-ObserverTask $taskName)) { throw 'Observer updater task registration failed' }
-@{status='ok'; task=$taskName; changed=$true} | ConvertTo-Json -Compress
+if ($startupJob) { Remove-Item -LiteralPath $jobFile -Force; [void](Disable-ObserverSupervisorIfIdle $jobsDirectory) }
+@{status='ok'; task=$taskName; changed=$true; launch_mode='task'} | ConvertTo-Json -Compress

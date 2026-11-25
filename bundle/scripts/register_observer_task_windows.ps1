@@ -14,6 +14,12 @@
 Assert-ObserverWindows
 $taskName = Get-ObserverTaskName $HostId
 $existing = Find-ObserverTask $taskName
+# Startup-item fallback (see observer_windows_common.ps1): one job file per host.
+$jobsDirectory = Join-Path ([System.IO.Path]::GetDirectoryName($PluginDirectory.TrimEnd('\'))) 'startup'
+$jobFile = Join-Path $jobsDirectory "$HostId.json"
+$supervisorScript = Join-Path $PluginDirectory 'scripts\observer_supervisor_windows.py'
+$startupPrefix = 'startup:'
+
 $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 if ($null -ne $existing) {
     $principalId = $existing.Principal.UserId
@@ -25,6 +31,8 @@ if ($null -ne $existing) {
 }
 if ($Mode -eq 'snapshot') {
     $xml = if ($null -ne $existing) { Export-ScheduledTask -TaskName $taskName -TaskPath '\' } else { '' }
+    $job = Get-ObserverStartupJob $jobFile
+    if (-not $xml -and $job) { $xml = $startupPrefix + [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($job)) }
     @{status='ok'; xml=$xml; running=($null -ne $existing -and $existing.State -eq 'Running')} | ConvertTo-Json -Compress
     return
 }
@@ -32,11 +40,23 @@ if ($Mode -eq 'uninstall') {
     Stop-ObserverTask $taskName
     if ($null -ne (Find-ObserverTask $taskName)) { Unregister-ScheduledTask -TaskName $taskName -TaskPath '\' -Confirm:$false }
     if ($null -ne (Find-ObserverTask $taskName)) { throw 'Selected task removal postcondition failed' }
+    if (Test-Path -LiteralPath $jobFile) { Remove-Item -LiteralPath $jobFile -Force; Stop-ObserverStartupWorker $StateDirectory }
+    [void](Disable-ObserverSupervisorIfIdle $jobsDirectory)
     @{status='ok'; host=$HostId; state_config_credentials_preserved=$true} | ConvertTo-Json -Compress
     return
 }
 if ($Mode -eq 'restore') {
     Stop-ObserverTask $taskName
+    if ($TaskXml -and $TaskXml.StartsWith($startupPrefix)) {
+        if ($null -ne (Find-ObserverTask $taskName)) { Unregister-ScheduledTask -TaskName $taskName -TaskPath '\' -Confirm:$false }
+        $job = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($TaskXml.Substring($startupPrefix.Length)))
+        $previous = $job | ConvertFrom-Json
+        Set-ObserverStartupJob $jobFile @{ name = $HostId; kind = 'worker'; execute = $previous.execute; arguments = $previous.arguments; cwd = $previous.cwd }
+        Enable-ObserverSupervisor $jobsDirectory $PythonExecutable $supervisorScript
+        @{status='ok'; restored=$true; launch_mode='startup'} | ConvertTo-Json -Compress
+        return
+    }
+    if (Test-Path -LiteralPath $jobFile) { Remove-Item -LiteralPath $jobFile -Force; Stop-ObserverStartupWorker $StateDirectory; [void](Disable-ObserverSupervisorIfIdle $jobsDirectory) }
     if ($TaskXml) {
         Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Xml $TaskXml -Force | Out-Null
         if ($WasRunning -eq 'True') { Start-ScheduledTask -TaskName $taskName -TaskPath '\' }
@@ -51,6 +71,11 @@ $helper = Join-Path $PSScriptRoot 'observer_windows.py'
 $planOutput = Invoke-ObserverNative $PythonExecutable @($helper,'plan','--host',$HostId,'--install-root',$PluginDirectory,'--python',$PythonExecutable,'--source-root',$SourceRoot,'--state-dir',$StateDirectory,'--config-file',$ConfigFile,'--runtime-dir',$RuntimeDirectory) 30
 $plan = $planOutput | ConvertFrom-Json
 if ($Mode -eq 'status') {
+    if ($null -eq $existing -and (Test-Path -LiteralPath $jobFile)) {
+        $heartbeat = Assert-ObserverStartupHeartbeat $StateDirectory ([datetimeoffset]::Now.AddMinutes(-5)) $plan 30
+        @{status='ok'; host=$HostId; launch_mode='startup'; job=$jobFile; heartbeat=$heartbeat} | ConvertTo-Json -Depth 8 -Compress
+        return
+    }
     if ($null -eq $existing) { throw 'Selected Observer task is not installed' }
     $heartbeat = Assert-ObserverHeartbeat $taskName $StateDirectory ([datetimeoffset]::Now.AddSeconds(-30)) $plan
     $info = Get-ScheduledTaskInfo -TaskName $taskName -TaskPath '\'
@@ -61,6 +86,7 @@ if ($Mode -eq 'status') {
 Invoke-ObserverNative $plan.python (@($plan.argv) + @('--check')) 30 | Out-Null
 $oldXml = if ($null -ne $existing) { Export-ScheduledTask -TaskName $taskName -TaskPath '\' } else { '' }
 $oldRunning = $null -ne $existing -and $existing.State -eq 'Running'
+$oldJob = Get-ObserverStartupJob $jobFile
 try {
     Stop-ObserverTask $taskName
     # Run from the state folder, not the bundle: a working directory inside the
@@ -74,14 +100,41 @@ try {
     )
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
     $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([timespan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
-    Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Description "AIHub selected $HostId Observer worker" -Force | Out-Null
-    $started = [datetimeoffset]::Now
-    Start-ScheduledTask -TaskName $taskName -TaskPath '\'
-    $heartbeat = Assert-ObserverHeartbeat $taskName $StateDirectory $started $plan
-    @{status='ok'; host=$HostId; task=$taskName; enabled=$true; heartbeat=$heartbeat} | ConvertTo-Json -Depth 8 -Compress
+    $denied = $false
+    try {
+        Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Action $action -Trigger $triggers -Principal $principal -Settings $settings -Description "AIHub selected $HostId Observer worker" -Force -ErrorAction Stop | Out-Null
+    } catch {
+        if (-not (Test-ObserverAccessDenied $_)) { throw }
+        $denied = $true
+    }
+    if (-not $denied) {
+        # Tasks are allowed (again): drop a startup-item job left from an earlier install.
+        if ($oldJob) { Remove-Item -LiteralPath $jobFile -Force; Stop-ObserverStartupWorker $StateDirectory; [void](Disable-ObserverSupervisorIfIdle $jobsDirectory) }
+        $started = [datetimeoffset]::Now
+        Start-ScheduledTask -TaskName $taskName -TaskPath '\'
+        $heartbeat = Assert-ObserverHeartbeat $taskName $StateDirectory $started $plan
+        @{status='ok'; host=$HostId; task=$taskName; enabled=$true; launch_mode='task'; heartbeat=$heartbeat} | ConvertTo-Json -Depth 8 -Compress
+    } else {
+        Write-Host "Observer: this computer does not allow scheduled tasks; using a startup item for $HostId instead."
+        $started = [datetimeoffset]::Now
+        # A new generation makes a running supervisor restart the worker with the new bundle.
+        Stop-ObserverStartupWorker $StateDirectory
+        Set-ObserverStartupJob $jobFile @{ name = $HostId; kind = 'worker'; execute = (Get-ObserverWindowlessPath $plan.python); arguments = $plan.arguments; cwd = $StateDirectory }
+        # The new bundle is in place: let the supervisor start workers again.
+        $pauseFile = Join-Path $jobsDirectory 'pause'
+        if (Test-Path -LiteralPath $pauseFile) { Remove-Item -LiteralPath $pauseFile -Force }
+        Enable-ObserverSupervisor $jobsDirectory $PythonExecutable $supervisorScript
+        $heartbeat = Assert-ObserverStartupHeartbeat $StateDirectory $started $plan
+        @{status='ok'; host=$HostId; job=$jobFile; enabled=$true; launch_mode='startup'; heartbeat=$heartbeat} | ConvertTo-Json -Depth 8 -Compress
+    }
 } catch {
     $nativeFailure = $_
     Stop-ObserverTask $taskName
+    if ($oldJob) {
+        Write-ObserverUtf8File $jobFile $oldJob
+    } elseif (Test-Path -LiteralPath $jobFile) {
+        Remove-Item -LiteralPath $jobFile -Force; Stop-ObserverStartupWorker $StateDirectory; [void](Disable-ObserverSupervisorIfIdle $jobsDirectory)
+    }
     if ($oldXml) {
         Register-ScheduledTask -TaskName $taskName -TaskPath '\' -Xml $oldXml -Force | Out-Null
         if ($oldRunning) { Start-ScheduledTask -TaskName $taskName -TaskPath '\' }

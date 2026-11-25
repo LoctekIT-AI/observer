@@ -148,6 +148,12 @@ if ($HostId -eq "workbuddy-desktop") {
 # hosts afterwards; the selected host is restarted by the install itself.
 $pausedTasks = @()
 $selectedWasRunning = $false
+# Startup-item machines (no scheduled tasks allowed): ask the supervisor to stop the workers
+# while the bundle is replaced; the selected host's registration lifts the pause.
+$startupPause = Join-Path (Join-Path ([System.IO.Path]::GetDirectoryName($PluginDirectory.TrimEnd('\'))) 'startup') 'pause'
+if ($Mode -eq 'install' -and (Test-Path -LiteralPath ([System.IO.Path]::GetDirectoryName($startupPause)))) {
+    Write-ObserverUtf8File $startupPause ([datetimeoffset]::Now.ToString('o'))
+}
 if ($Mode -eq 'install') {
     foreach ($otherHost in @('dsh','codex','claude','workbuddy-desktop')) {
         $otherName = Get-ObserverTaskName $otherHost
@@ -172,6 +178,7 @@ try {
     Invoke-ObserverNative $observerPython $arguments 1260
     $installSucceeded = $true
 } finally {
+    if (Test-Path -LiteralPath $startupPause) { Remove-Item -LiteralPath $startupPause -Force -ErrorAction SilentlyContinue }
     foreach ($pausedName in $pausedTasks) {
         try { Start-ScheduledTask -TaskName $pausedName -TaskPath '\' } catch { Write-Warning "Observer task could not be restarted: $pausedName" }
     }

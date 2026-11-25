@@ -256,3 +256,102 @@ function Assert-ObserverHeartbeat([string]$TaskName, [string]$StateDirectory, [d
     if ($staleHeartbeat) { throw "Selected heartbeat process has exited (pid $staleHeartbeat) and no newer heartbeat arrived within 40 seconds: $TaskName" }
     throw "Selected worker has no fresh running heartbeat after 40 seconds: $TaskName"
 }
+
+
+# ---- Startup-item fallback --------------------------------------------------------------
+# Some company computers refuse to create scheduled tasks for a normal user (security
+# software or policy: Register-ScheduledTask and schtasks both answer "access denied").
+# There the installer writes a job file per program into <Observer root>\startup and
+# registers observer_supervisor_windows.py as a per-user startup item (HKCU ... Run);
+# the supervisor starts and restarts the programs. Machines that allow tasks are unchanged.
+
+$ObserverStartupValueName = 'AIHub Observer'
+$ObserverRunKey = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+
+function Test-ObserverAccessDenied($ErrorRecord) {
+    $exception = $ErrorRecord.Exception
+    while ($null -ne $exception) {
+        if ($exception.HResult -eq -2147024891) { return $true }  # 0x80070005 E_ACCESSDENIED
+        if ($exception -is [System.UnauthorizedAccessException]) { return $true }
+        $exception = $exception.InnerException
+    }
+    if ([string]$ErrorRecord.CategoryInfo.Category -eq 'PermissionDenied') { return $true }
+    return ([string]$ErrorRecord.FullyQualifiedErrorId) -like '*0x80070005*'
+}
+
+function Write-ObserverUtf8File([string]$Path, [string]$Text) {
+    $directory = [System.IO.Path]::GetDirectoryName($Path)
+    if (-not (Test-Path -LiteralPath $directory)) { New-Item -ItemType Directory -Force -Path $directory | Out-Null }
+    $temporary = $Path + '.tmp'
+    [System.IO.File]::WriteAllText($temporary, $Text, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temporary -Destination $Path -Force
+}
+
+function Get-ObserverStartupJob([string]$JobFile) {
+    if (-not (Test-Path -LiteralPath $JobFile -PathType Leaf)) { return $null }
+    return [System.IO.File]::ReadAllText($JobFile)
+}
+
+function Set-ObserverStartupJob([string]$JobFile, [hashtable]$Job) {
+    $Job['generation'] = [datetimeoffset]::Now.ToString('o')
+    Write-ObserverUtf8File $JobFile ($Job | ConvertTo-Json -Compress)
+}
+
+function Enable-ObserverSupervisor([string]$JobsDirectory, [string]$PythonExecutable, [string]$SupervisorScript) {
+    if (-not (Test-Path -LiteralPath $SupervisorScript -PathType Leaf)) { throw "Observer supervisor script is missing: $SupervisorScript" }
+    $pythonw = Get-ObserverWindowlessPath $PythonExecutable
+    $arguments = (ConvertTo-ObserverArgument $SupervisorScript) + ' --jobs-dir ' + (ConvertTo-ObserverArgument $JobsDirectory)
+    $command = (ConvertTo-ObserverArgument $pythonw) + ' ' + $arguments
+    if (-not (Test-Path -LiteralPath $ObserverRunKey)) { New-Item -Path $ObserverRunKey -Force | Out-Null }
+    Set-ItemProperty -LiteralPath $ObserverRunKey -Name $ObserverStartupValueName -Value $command -Type String
+    # Start it now as well; a second copy exits at once when one is already running.
+    Start-Process -FilePath $pythonw -ArgumentList $arguments -WorkingDirectory $JobsDirectory -WindowStyle Hidden | Out-Null
+}
+
+function Disable-ObserverSupervisorIfIdle([string]$JobsDirectory) {
+    $jobs = @(if (Test-Path -LiteralPath $JobsDirectory) { Get-ChildItem -LiteralPath $JobsDirectory -Filter '*.json' -File })
+    if ($jobs.Count -gt 0) { return $false }
+    $properties = Get-ItemProperty -LiteralPath $ObserverRunKey -ErrorAction SilentlyContinue
+    if ($null -ne $properties -and $null -ne $properties.PSObject.Properties[$ObserverStartupValueName]) {
+        Remove-ItemProperty -LiteralPath $ObserverRunKey -Name $ObserverStartupValueName
+    }
+    return $true  # the supervisor exits by itself once it sees no jobs
+}
+
+function Stop-ObserverStartupWorker([string]$StateDirectory) {
+    # The supervisor stops a worker whose job file is gone; this also covers a worker left
+    # by a supervisor that is no longer running. Only a process whose command line names
+    # this state folder is stopped.
+    $statusPath = Join-Path $StateDirectory 'status.json'
+    if (-not (Test-Path -LiteralPath $statusPath -PathType Leaf)) { return }
+    try { $workerId = [uint32]((Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json).pid) } catch { return }
+    if ($workerId -eq 0) { return }
+    $process = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $workerId" -ErrorAction SilentlyContinue
+    if ($null -eq $process -or -not ([string]$process.CommandLine).Contains($StateDirectory.TrimEnd('\'))) { return }
+    $parent = Get-CimInstance -ClassName Win32_Process -Filter ("ProcessId = " + [uint32]$process.ParentProcessId) -ErrorAction SilentlyContinue
+    Stop-Process -Id $workerId -Force -ErrorAction SilentlyContinue
+    # The venv launcher (pythonw.exe of the venv) waits for its child; stop it too when it runs this worker.
+    if ($null -ne $parent -and ([string]$parent.CommandLine).Contains($StateDirectory.TrimEnd('\'))) { Stop-Process -Id $parent.ProcessId -Force -ErrorAction SilentlyContinue }
+}
+
+function Assert-ObserverStartupHeartbeat([string]$StateDirectory, [datetimeoffset]$Since, $Plan, [int]$Seconds = 75) {
+    $deadline = (Get-Date).AddSeconds($Seconds)
+    $statusPath = Join-Path $StateDirectory 'status.json'
+    do {
+        if (Test-Path -LiteralPath $statusPath -PathType Leaf) {
+            try { $heartbeat = Get-Content -LiteralPath $statusPath -Raw | ConvertFrom-Json } catch { $heartbeat = $null }
+            if ($null -ne $heartbeat -and [datetimeoffset]::Parse($heartbeat.checked_at) -ge $Since) {
+                if ($heartbeat.status -ne 'ok') {
+                    $errorCodes = @($heartbeat.errors | ForEach-Object { $_.code })
+                    $onlyDelivery = ($errorCodes.Count -gt 0) -and (@($errorCodes | Where-Object { $_ -ne 'delivery_failed' }).Count -eq 0)
+                    if (-not $onlyDelivery) { throw "Selected worker heartbeat reports failure: $statusPath" }
+                }
+                $workerId = [uint32]$heartbeat.pid
+                $process = Get-CimInstance -ClassName Win32_Process -Filter "ProcessId = $workerId" -ErrorAction SilentlyContinue
+                if ($null -ne $process -and ([string]$process.CommandLine).Contains([string]$Plan.arguments)) { return $heartbeat }
+            }
+        }
+        Start-Sleep -Milliseconds 500
+    } while ((Get-Date) -lt $deadline)
+    throw "Selected worker has no fresh running heartbeat after $Seconds seconds (startup item): $StateDirectory"
+}
