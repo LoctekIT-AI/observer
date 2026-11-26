@@ -54,7 +54,7 @@ def _flatten(value: object, prefix: str = "") -> dict[str, object]:
 
 
 def fetch_observations(base: str, public: str, secret: str, start: datetime, end: datetime,
-                       opener=urllib.request.urlopen, name: str | None = None) -> list[dict]:
+                       opener=urllib.request.urlopen) -> list[dict]:
     auth = base64.b64encode(f"{public}:{secret}".encode()).decode()
     rows: list[dict] = []
     cursor = None
@@ -62,8 +62,6 @@ def fetch_observations(base: str, public: str, secret: str, start: datetime, end
         query = {"fields": "core,metadata", "limit": "1000",
                  "fromStartTime": start.isoformat().replace("+00:00", "Z"),
                  "toStartTime": end.isoformat().replace("+00:00", "Z")}
-        if name:
-            query["name"] = name
         if cursor:
             query["cursor"] = cursor
         request = urllib.request.Request(f"{base.rstrip('/')}/api/public/v2/observations?{urllib.parse.urlencode(query)}",
@@ -302,10 +300,10 @@ def main(argv: list[str] | None = None) -> int:
         print("missing OBSERVER_LANGFUSE_BASE_URL / _PUBLIC_KEY / _SECRET_KEY", file=sys.stderr)
         return 2
     now = datetime.now(timezone.utc)
-    rows = fetch_observations(base, public, secret, now - timedelta(days=WINDOW_DAYS), now)
-    calls, _ = normalize(rows)
-    # Health records over a longer window, so a collector that went quiet stays listed.
-    _, health = normalize(fetch_observations(base, public, secret, now - timedelta(days=HEALTH_DAYS), now, name="observer.health"))
+    # HEALTH_DAYS back, so a collector that went quiet stays listed; call counts still use 1 / 3 days.
+    # (The v2 observations API leaves the top-level name empty, so it cannot filter health records.)
+    rows = fetch_observations(base, public, secret, now - timedelta(days=HEALTH_DAYS), now)
+    calls, health = normalize(rows)
     text = build_report(calls, health, now=now, latest_release=latest_release(), auth_ok=auth_healthy(args.auth_healthz))
     if args.dry_run:
         print(text)
