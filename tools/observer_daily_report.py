@@ -35,6 +35,7 @@ INSTALLATION = re.compile(r"^observer-(codex|claude|dsh|workbuddy-desktop)-[0-9a
 CHANNEL_URL = "https://raw.githubusercontent.com/LoctekIT-AI/observer/main/channels/release.json"
 WINDOW_DAYS = 3          # "no calls for 3 days" and "offline" look back this far
 OFFLINE_HOURS = 24       # no health record for this long = offline
+HEALTH_DAYS = 14         # an offline collector keeps being listed this long (then it is treated as removed)
 PENDING_LIMIT = 100      # upload queue backlog worth reporting
 
 
@@ -53,7 +54,7 @@ def _flatten(value: object, prefix: str = "") -> dict[str, object]:
 
 
 def fetch_observations(base: str, public: str, secret: str, start: datetime, end: datetime,
-                       opener=urllib.request.urlopen) -> list[dict]:
+                       opener=urllib.request.urlopen, name: str | None = None) -> list[dict]:
     auth = base64.b64encode(f"{public}:{secret}".encode()).decode()
     rows: list[dict] = []
     cursor = None
@@ -61,6 +62,8 @@ def fetch_observations(base: str, public: str, secret: str, start: datetime, end
         query = {"fields": "core,metadata", "limit": "1000",
                  "fromStartTime": start.isoformat().replace("+00:00", "Z"),
                  "toStartTime": end.isoformat().replace("+00:00", "Z")}
+        if name:
+            query["name"] = name
         if cursor:
             query["cursor"] = cursor
         request = urllib.request.Request(f"{base.rstrip('/')}/api/public/v2/observations?{urllib.parse.urlencode(query)}",
@@ -186,7 +189,9 @@ def build_report(calls: list[dict], health: list[dict], *, now: datetime, latest
     for (person, runtime), h in sorted(latest.items()):
         meta, who, client = h["meta"], _who(h), _client(runtime)
         if h["at"] < now - timedelta(hours=OFFLINE_HOURS):
-            issues.append(f"{who} {client}：{OFFLINE_HOURS} 小时没有上线（最后 {_cst(h['at'])}，可能关机或收集器停了）")
+            days = (now - h["at"]).days
+            silent = f"已经 {days} 天没有上线" if days >= 2 else f"{OFFLINE_HOURS} 小时没有上线"
+            issues.append(f"{who} {client}：{silent}（最后 {_cst(h['at'])}，可能关机、休假或收集器被关了）")
             continue
         status = _get(meta, "observer.health.status")
         codes = _get(meta, "observer.health.error_codes")
@@ -298,7 +303,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     now = datetime.now(timezone.utc)
     rows = fetch_observations(base, public, secret, now - timedelta(days=WINDOW_DAYS), now)
-    calls, health = normalize(rows)
+    calls, _ = normalize(rows)
+    # Health records over a longer window, so a collector that went quiet stays listed.
+    _, health = normalize(fetch_observations(base, public, secret, now - timedelta(days=HEALTH_DAYS), now, name="observer.health"))
     text = build_report(calls, health, now=now, latest_release=latest_release(), auth_ok=auth_healthy(args.auth_healthz))
     if args.dry_run:
         print(text)

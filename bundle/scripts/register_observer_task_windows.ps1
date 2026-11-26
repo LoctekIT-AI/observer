@@ -115,7 +115,8 @@ try {
         $heartbeat = Assert-ObserverHeartbeat $taskName $StateDirectory $started $plan
         @{status='ok'; host=$HostId; task=$taskName; enabled=$true; launch_mode='task'; heartbeat=$heartbeat} | ConvertTo-Json -Depth 8 -Compress
     } else {
-        Write-Host "Observer: this computer does not allow scheduled tasks; using a startup item for $HostId instead."
+        # stderr: stdout carries only the JSON result read by observer_windows.py
+        [Console]::Error.WriteLine("Observer: this computer does not allow scheduled tasks; using a startup item for $HostId instead.")
         $started = [datetimeoffset]::Now
         # A new generation makes a running supervisor restart the worker with the new bundle.
         Stop-ObserverStartupWorker $StateDirectory

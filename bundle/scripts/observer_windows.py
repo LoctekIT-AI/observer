@@ -117,6 +117,15 @@ def _remove_updater_task() -> None:
         print(f"warning: Observer updater task could not be removed: {result.stderr.strip()}", file=sys.stderr)
 
 
+def _json_result(stdout: str) -> dict:
+    """The JSON object a native script printed; notes printed before it (one line each) are skipped."""
+    for line in reversed(stdout.splitlines()):
+        line = line.strip()
+        if line.startswith("{"):
+            return json.loads(line)
+    raise ValueError(f"native script printed no JSON result: {stdout.strip()[:200]!r}")
+
+
 def _powershell(args: argparse.Namespace, action: str, **extra: str) -> dict:
     executable = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
     command = [str(executable), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", str(ROOT / "scripts/register_observer_task_windows.ps1"), "-Mode", action, "-HostId", args.host, "-PluginDirectory", str(args.install_root), "-PythonExecutable", str(args.python), "-SourceRoot", str(args.source_root), "-StateDirectory", str(args.state_dir), "-ConfigFile", str(args.config_file), "-RuntimeDirectory", str(args.runtime_dir)]
@@ -125,7 +134,7 @@ def _powershell(args: argparse.Namespace, action: str, **extra: str) -> dict:
     result = subprocess.run(command, capture_output=True, text=True, timeout=180)
     if result.returncode:
         raise RuntimeError(f"selected native task {action} failed ({result.returncode}): {result.stderr.strip()}")
-    return json.loads(result.stdout)
+    return _json_result(result.stdout)
 
 
 def _is_harness_launcher(cli: Path) -> bool:

@@ -45,6 +45,7 @@ def test_report_counts_calls_and_lists_problems():
         _health(NOW - timedelta(minutes=30), outbox_pending=250),
         _health(NOW - timedelta(minutes=30), runtime="workbuddy", bundle_version="0.3.1", update_status="gave_up"),
         _health(NOW - timedelta(hours=30), runtime="claude"),                        # offline
+        _health(NOW - timedelta(days=5, hours=1), runtime="dsh", who=("L20001", "王五")),  # offline for days
         _health(NOW - timedelta(hours=2), who=("L10998", "宋扬")),                    # online, never used
         _health(NOW - timedelta(hours=2), runtime="dsh", coverage_gaps="coverage_gap:skill"),
     ]
@@ -57,6 +58,7 @@ def test_report_counts_calls_and_lists_problems():
     assert "上传积压 250 条" in text
     assert "陈芝依(L05721) WorkBuddy：版本 0.3.1，落后于 0.3.2（自动更新：gave_up）" in text
     assert "陈芝依(L05721) Claude：24 小时没有上线" in text
+    assert "王五(L20001) AI Hub：已经 5 天没有上线" in text
     assert "宋扬(L10998)：电脑在线，但 3 天没有任何 Skill / MCP 调用" in text
     assert "疑似漏采 coverage_gap:skill" in text
     assert "1 次读不懂的调用" in text

@@ -89,3 +89,16 @@ def test_main_exits_without_jobs_and_single_instance(tmp_path):
     assert sup.main(["--jobs-dir", str(tmp_path)]) == 0  # another one is running: exit at once
     lock.release()
     assert "no jobs left" in (tmp_path / sup.LOG_NAME).read_text()
+
+
+def test_native_result_skips_notes_printed_before_the_json():
+    # v0.3.7 on a computer without scheduled tasks: the register script printed a note line
+    # before its JSON and the install was rolled back ("Expecting value: line 1 column 1").
+    import pytest
+    from observer_windows import _json_result
+
+    note = "Observer: this computer does not allow scheduled tasks; using a startup item for codex instead.\n"
+    assert _json_result(note + '{"status":"ok","launch_mode":"startup"}\n') == {"status": "ok", "launch_mode": "startup"}
+    assert _json_result('{"status":"ok"}') == {"status": "ok"}
+    with pytest.raises(ValueError):
+        _json_result(note)
