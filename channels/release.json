@@ -1,11 +1,11 @@
 {
-  "asset": "observer-v0.3.7.zip",
+  "asset": "observer-v0.3.8.zip",
   "channel": "release",
-  "published_at": "2026-11-25T07:42:55+00:00",
+  "published_at": "2026-11-26T00:57:42+00:00",
   "schema": "observer.channel.v1",
-  "sha256": "0b5a92aafc5f409cba65d910f58540ee6f4e056a7cb67e008df2f6cdd50d370f",
-  "signature": "191c0e5ccf290fe7a23af493752db770fe0b1bc09ab9c9beb08e36c8bbc3973c532dea2a875b3e9684269919aeb00b7016dadaed2f8d436e15702dd8f12ca209",
-  "size": 525625,
-  "tag": "v0.3.7",
-  "version": "0.3.7"
+  "sha256": "72b01da22d227185ebf8891029c8e3d0523fb191fd0cf875f89bf119a316c017",
+  "signature": "27b284a88b2e4e7a92ae7bad50203781dac6e748b55de4e9027b7c4dd4c4d9563f474e8a3ae29c9c79f00cbe7db7913c85f44137df6def696e058a71a496bd0f",
+  "size": 525813,
+  "tag": "v0.3.8",
+  "version": "0.3.8"
 }
