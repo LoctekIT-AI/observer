@@ -362,7 +362,7 @@ def _dsh_profile(profile_dir: Path) -> dict[str, object]:
         dependency = package in manifest.get("dependencies", {})
         layer = package in manifest.get("dsh", {}).get("profile", {}).get("bundles", [])
         installed = json.loads((root / "node_modules/@observer/dsh-observer/package.json").read_text()) if dependency else {}
-        result.update({"dependency_installed": dependency, "bundle_layer_enabled": layer, "plugin_version": installed.get("version"), "status": "configured" if dependency and layer else "not_enabled", "tested_desktop_version": "0.9.0", "tested_framework_version": "0.1.5-rc.2"})
+        result.update({"dependency_installed": dependency, "bundle_layer_enabled": layer, "plugin_version": installed.get("version"), "status": "configured" if dependency and layer else "not_enabled", "tested_desktop_version": "1.0.4", "tested_framework_version": "1.0.0"})
     except FileNotFoundError:
         return result
     except (OSError, ValueError) as exc:

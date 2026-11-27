@@ -7,6 +7,7 @@ import hashlib
 import gzip
 import io
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -18,6 +19,14 @@ PACKAGE_NAME = "@observer/dsh-observer"
 # DeepSeek Harness desktop builds whose bundled DSH runtime was verified with this
 # plugin (tools/execute, tools/result and session/event seams present).
 HARNESS_DESKTOP_VERSIONS = {"0.2.0-rc.2"}
+# AI Hub 1.0.x (runtime desktopVersion 1.0.0, app 1.0.4, 2026-11-27): the tool and session
+# seams the plugin uses are unchanged from 0.2.0-rc.2, so the whole 1.x line is accepted;
+# a new major version stays blocked until it is checked.
+_HARNESS_TESTED_MAJOR = re.compile(r"1\.\d+\.\d+(?:-[0-9A-Za-z.]+)?")
+
+
+def harness_version_verified(version: object) -> bool:
+    return version in HARNESS_DESKTOP_VERSIONS or (isinstance(version, str) and _HARNESS_TESTED_MAJOR.fullmatch(version) is not None)
 
 
 def is_harness_launcher(dsh_cli: Path) -> bool:
@@ -91,7 +100,7 @@ def dsh_command(dsh_cli: Path, node: Path | None, *arguments: str) -> list[str]:
 def verify_native_runtime(dsh_cli: Path) -> None:
     if is_harness_launcher(dsh_cli):
         runtime = json.loads((dsh_cli.parents[2] / "primary-runtime" / "runtime.json").read_text(encoding="utf-8"))
-        if runtime.get("desktopVersion") not in HARNESS_DESKTOP_VERSIONS:
+        if not harness_version_verified(runtime.get("desktopVersion")):
             raise ValueError(f"unverified DeepSeek Harness version: {runtime.get('desktopVersion')}")
         return
     for package, expected in (("dsh-tools", "0.1.5-rc.2"), ("dsh-session", "0.1.5-rc.2"), ("cordis", "4.0.2")):

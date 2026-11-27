@@ -84,3 +84,14 @@ def test_detect_script_finds_ai_hub_in_user_applications(tmp_path):
     line = next(item for item in out.splitlines() if item.startswith("dsh\t"))
     assert line.split("\t")[1] == "found" and str(home / "Applications/AI Hub.app") in line
     assert "dsh" in out.splitlines()[-1]
+
+
+def test_aihub_1x_runtime_is_accepted_and_a_new_major_is_not():
+    import install_dsh_observer as dsh
+
+    assert dsh.harness_version_verified("0.2.0-rc.2")
+    assert dsh.harness_version_verified("1.0.0")   # AI Hub 1.0.4 ships runtime 1.0.0
+    assert dsh.harness_version_verified("1.2.3-rc.1")
+    assert not dsh.harness_version_verified("2.0.0")
+    assert not dsh.harness_version_verified("0.3.0")
+    assert not dsh.harness_version_verified(None)
