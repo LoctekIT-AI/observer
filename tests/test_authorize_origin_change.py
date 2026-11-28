@@ -61,3 +61,44 @@ def test_installers_reuse_a_login_only_for_the_same_site():
     scripts = Path(__file__).resolve().parents[1] / "bundle/scripts"
     assert 'grep -qxF "OBSERVER_AUTH_ORIGIN=${observer_auth_origin%/}"' in (scripts / "bootstrap_observer_macos.sh").read_text()
     assert "'^OBSERVER_AUTH_ORIGIN=' + [regex]::Escape($AuthOrigin.TrimEnd('/'))" in (scripts / "install_observer_windows.ps1").read_text(encoding="utf-8-sig")
+
+
+def _reuse_fails(monkeypatch, message):
+    def access_token(self):
+        raise auth.ObserverAuthError(message)
+    monkeypatch.setattr(auth.ObserverAuthorizationClient, "access_token", access_token)
+
+
+def test_expired_login_logs_in_again(tmp_path, monkeypatch, capsys):
+    # A computer that was uninstalled or off for a month: reinstalling asks for a new login.
+    config, calls = _setup(tmp_path, monkeypatch)
+    _reuse_fails(monkeypatch, "Observer refresh token has expired; authorization is required again")
+    assert auth.main(["--client-type", "codex", "--config-file", str(config), "--auth-origin", TEST_ORIGIN]) == 0
+    assert calls == [("authorize", TEST_ORIGIN)]
+    assert "登录已过期" in capsys.readouterr().err
+
+
+def test_refused_login_logs_in_again(tmp_path, monkeypatch):
+    config, calls = _setup(tmp_path, monkeypatch)
+    _reuse_fails(monkeypatch, "Observer authorization rejected: refresh token is invalid")
+    assert auth.main(["--client-type", "codex", "--config-file", str(config), "--auth-origin", TEST_ORIGIN]) == 0
+    assert calls == [("authorize", TEST_ORIGIN)]
+
+
+def test_network_failure_does_not_ask_for_a_new_login(tmp_path, monkeypatch, capsys):
+    config, calls = _setup(tmp_path, monkeypatch)
+    _reuse_fails(monkeypatch, "Observer authorization request failed: URLError")
+    assert auth.main(["--client-type", "codex", "--config-file", str(config), "--auth-origin", TEST_ORIGIN]) == 2
+    assert calls == []
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1])["status"] == "blocked"
+
+
+def test_installers_check_a_found_login_instead_of_skipping_it():
+    from pathlib import Path
+    scripts = Path(__file__).resolve().parents[1] / "bundle/scripts"
+    mac = (scripts / "bootstrap_observer_macos.sh").read_text()
+    assert "reusing it without a new login" not in mac
+    assert mac.count('scripts/observer_authorize.py" --client-type') == 2
+    win = (scripts / "install_observer_windows.ps1").read_text(encoding="utf-8-sig")
+    assert "reusing it without a new login" not in win
+    assert win.count("'observer_authorize.py'),'--client-type'") == 2

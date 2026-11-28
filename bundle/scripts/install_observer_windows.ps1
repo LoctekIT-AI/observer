@@ -122,7 +122,9 @@ if ($Mode -eq 'install') {
             Invoke-ObserverNative $node @((Join-Path $pnpmRoot 'node_modules\pnpm\bin\pnpm.cjs'),'--version') 30 | Out-Null
         }
         if ($Authorize -and -not $ReplaceConfig -and (Test-Path -LiteralPath $ConfigFile -PathType Leaf) -and (Select-String -LiteralPath $ConfigFile -Pattern '^OBSERVER_AUTH_TOKEN_REF=.' -Quiet) -and (Select-String -LiteralPath $ConfigFile -Pattern ('^OBSERVER_AUTH_ORIGIN=' + [regex]::Escape($AuthOrigin.TrimEnd('/')) + '$') -Quiet)) {
-            Write-Host 'Observer: existing Observer login found; reusing it without a new login'
+            # observer_authorize.py reuses it, or asks for a new login when it has expired.
+            Write-Host 'Observer: existing Observer login found; checking it'
+            Invoke-ObserverNative $observerPython @((Join-Path $PSScriptRoot 'observer_authorize.py'),'--client-type',$HostId,'--config-file',$ConfigFile,'--auth-origin',$AuthOrigin) 660 | Out-Null
         } elseif ($Authorize) {
             $authArgs = @((Join-Path $PSScriptRoot 'observer_authorize.py'),'--client-type',$HostId,'--config-file',$ConfigFile,'--auth-origin',$AuthOrigin)
             if ($ReplaceConfig) { $authArgs += '--replace' }

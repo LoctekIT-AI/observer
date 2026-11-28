@@ -182,7 +182,9 @@ fi
 # environment to production (another origin) must log in again.
 if [ "$observer_authorize" -eq 1 ] && [ "${#observer_replace[@]}" -eq 0 ] && [ -f "$observer_config" ] && /usr/bin/grep -q '^OBSERVER_AUTH_TOKEN_REF=.' "$observer_config" \
     && /usr/bin/grep -qxF "OBSERVER_AUTH_ORIGIN=${observer_auth_origin%/}" "$observer_config"; then
-    printf '%s\n' 'Observer bootstrap: existing Observer login found; reusing it without a new login'
+    # observer_authorize.py reuses it, or asks for a new login when it has expired.
+    printf '%s\n' 'Observer bootstrap: existing Observer login found; checking it'
+    "$observer_python" "$observer_source/scripts/observer_authorize.py" --client-type "${observer_hosts[0]}" --config-file "$observer_config" --auth-origin "$observer_auth_origin"
 elif [ "$observer_authorize" -eq 1 ]; then
     "$observer_python" "$observer_source/scripts/observer_authorize.py" --client-type "${observer_hosts[0]}" --config-file "$observer_config" --auth-origin "$observer_auth_origin" ${observer_replace[@]+"${observer_replace[@]}"}
 fi

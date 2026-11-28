@@ -98,6 +98,11 @@ def _render_config(*, values: dict[str, str], origin: str, client_type: str, ins
     return "\n".join(f"{key}={value}" for key, value in rendered.items()) + "\n"
 
 
+def _login_needs_renewal(error: ObserverAuthError) -> bool:
+    message = str(error)
+    return "has expired" in message or message.startswith("Observer authorization rejected")
+
+
 def _authorize_or_reuse(args: argparse.Namespace, config_file: Path) -> int:
     values = _read_config(config_file)
     has_existing_auth = bool(values.get("OBSERVER_AUTH_TOKEN_REF"))
@@ -115,16 +120,25 @@ def _authorize_or_reuse(args: argparse.Namespace, config_file: Path) -> int:
         installation_id = values.get("OBSERVER_INSTALLATION_ID", "")
         if not client_type or not installation_id:
             raise ValueError("existing Observer authorization is missing its client identity")
-        token = ObserverAuthorizationClient(
-            origin=values.get("OBSERVER_AUTH_ORIGIN", args.auth_origin),
-            client_type=client_type,
-            installation_id=installation_id,
-            store=ObserverTokenStore(SERVICE, account),
-            timeout_seconds=args.timeout_seconds,
-            refresh_lock_path=config_file.with_name(".observer-token-refresh.lock"),
-        ).access_token()
-        print(json.dumps({"status": "ok", "authorization": "reused", "client_type": client_type, "installation_id": installation_id, "config_file": str(config_file), "telemetry_endpoint": token.telemetry_endpoint}, ensure_ascii=False, sort_keys=True))
-        return 0
+        try:
+            token = ObserverAuthorizationClient(
+                origin=values.get("OBSERVER_AUTH_ORIGIN", args.auth_origin),
+                client_type=client_type,
+                installation_id=installation_id,
+                store=ObserverTokenStore(SERVICE, account),
+                timeout_seconds=args.timeout_seconds,
+                refresh_lock_path=config_file.with_name(".observer-token-refresh.lock"),
+            ).access_token()
+        except ObserverAuthError as exc:
+            # A computer that was off (or uninstalled) for a long time: the saved login has
+            # expired or was refused. Log in again instead of failing the install. A network
+            # failure is not a reason to ask for a new login and still stops here.
+            if not _login_needs_renewal(exc):
+                raise
+            print("Observer: 之前的登录已过期，需要重新用飞书登录。", file=sys.stderr, flush=True)
+        else:
+            print(json.dumps({"status": "ok", "authorization": "reused", "client_type": client_type, "installation_id": installation_id, "config_file": str(config_file), "telemetry_endpoint": token.telemetry_endpoint}, ensure_ascii=False, sort_keys=True))
+            return 0
     installation_id = args.installation_id or values.get("OBSERVER_INSTALLATION_ID") or f"observer-{args.client_type}-{secrets.token_hex(12)}"
     token_store = ObserverTokenStore(SERVICE, account)
     previous_secret: str | None = None
